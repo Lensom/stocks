@@ -1,6 +1,10 @@
 import { ReactNode } from "react";
 import { Footer } from "./footer";
 import { Header } from "./header";
+import { Sidebar } from "./sidebar";
+import { AuthProvider } from "@/state/auth-store";
+import { CategoriesProvider } from "@/state/categories-store";
+import { InvestingProvider } from "@/state/investing-store";
 
 type AppShellProps = {
   children: ReactNode;
@@ -9,11 +13,18 @@ type AppShellProps = {
 export function AppShell({ children }: AppShellProps) {
   return (
     <div className="flex min-h-screen flex-col bg-[#f6f3ea]">
-      <Header />
-      <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-7 md:px-6 md:py-8">
-        {children}
-      </main>
-      <Footer />
+      <AuthProvider>
+        <Header />
+        <CategoriesProvider>
+          <InvestingProvider>
+            <div className="mx-auto flex w-full max-w-[1400px] flex-1 gap-5 px-5 py-7 md:px-6 md:py-8">
+              <Sidebar />
+              <main className="min-w-0 flex-1">{children}</main>
+            </div>
+          </InvestingProvider>
+        </CategoriesProvider>
+        <Footer />
+      </AuthProvider>
     </div>
   );
 }
