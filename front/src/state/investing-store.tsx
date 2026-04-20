@@ -15,17 +15,58 @@ export type InvestingCapitalEntry = {
   one_year_percent: string;
 };
 
+export type InvestingActivity = {
+  id: string;
+  type: "buy" | "sell";
+  name: string;
+  ticker: string;
+  category: string;
+  count: number;
+  price: string;
+  currency: string;
+  amount: string;
+  gains_losses: string;
+  commission: string;
+  date: string;
+  amount_usd?: string;
+  gains_losses_usd?: string;
+  commission_usd?: string;
+  fx_rate_to_usd?: string;
+};
+
+export type InvestingActivityYearSummary = {
+  year: string;
+  purchases_amount: string;
+  purchases_commission: string;
+  sales_amount: string;
+  sales_pnl: string;
+  sales_commission: string;
+  net_cash_flow: string;
+};
+
 type InvestingStore = {
   holdings: InvestingHolding[];
   holdingsMeta: { source: "server" | "default"; updatedAt: string | null };
   capitalEntries: InvestingCapitalEntry[];
   capitalEntriesMeta: { updatedAt: string | null };
+  activities: InvestingActivity[];
+  activitiesSummary: InvestingActivityYearSummary[];
+  activitiesMeta: { updatedAt: string | null };
+  isActivitiesLoading: boolean;
+  isActivitiesSaving: boolean;
+  isActivitiesDirty: boolean;
   isCapitalEntriesLoading: boolean;
   isCapitalEntriesDirty: boolean;
   isCapitalEntriesSaving: boolean;
-  metrics: { divYieldPercent: string; beta: string };
+  metrics: { divYieldPercent: string; beta: string; allocationPercent: Record<string, string> };
   isMetricsLoading: boolean;
   isHoldingsLoading: boolean;
+  isMarketPricesLoading: boolean;
+  notes: string;
+  notesMeta: { updatedAt: string | null };
+  isNotesLoading: boolean;
+  isNotesSaving: boolean;
+  isNotesDirty: boolean;
   isHoldingsDirty: boolean;
   isHoldingsSaving: boolean;
   updateHolding: (id: string, patch: Partial<InvestingHolding>) => void;
@@ -35,12 +76,23 @@ type InvestingStore = {
   updateCapitalEntry: (id: string, patch: Partial<InvestingCapitalEntry>) => void;
   addCapitalEntry: () => void;
   deleteCapitalEntry: (id: string) => void;
+  updateActivity: (id: string, patch: Partial<InvestingActivity>) => void;
+  addActivity: (type: "buy" | "sell") => void;
+  deleteActivity: (id: string) => void;
+  refreshActivities: () => Promise<void>;
+  saveActivities: () => Promise<void>;
   refreshCapitalEntries: () => Promise<void>;
   saveCapitalEntries: () => Promise<void>;
   refreshHoldings: () => Promise<void>;
+  refreshMarketPrices: () => Promise<void>;
   saveHoldings: () => Promise<void>;
+  setNotes: (next: string) => void;
+  refreshNotes: () => Promise<void>;
+  saveNotes: () => Promise<void>;
   refreshMetrics: () => Promise<void>;
-  updateMetrics: (patch: Partial<{ divYieldPercent: string; beta: string }>) => Promise<void>;
+  updateMetrics: (
+    patch: Partial<{ divYieldPercent: string; beta: string; allocationPercent: Record<string, string> }>,
+  ) => Promise<void>;
 };
 
 const InvestingContext = createContext<InvestingStore | null>(null);
@@ -81,6 +133,24 @@ function normalizeHoldings(rows: InvestingHolding[]): InvestingHolding[] {
   });
 }
 
+function applyMarketPrices(
+  rows: InvestingHolding[],
+  prices: Record<string, number>,
+): InvestingHolding[] {
+  const updated = rows.map((row) => {
+    const ticker = (row.ticker ?? "").trim().toUpperCase();
+    const market = prices[ticker];
+    if (typeof market !== "number" || !Number.isFinite(market)) return row;
+    const shares = Number(row.shares ?? 0) || 0;
+    return {
+      ...row,
+      marketPrice: formatUsd(market),
+      marketValue: formatUsd(market * shares),
+    };
+  });
+  return normalizeHoldings(updated);
+}
+
 export function InvestingProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth();
   const [holdings, setHoldings] = useState<InvestingHolding[]>([]);
@@ -89,18 +159,34 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
     updatedAt: string | null;
   }>({ source: "default", updatedAt: null });
   const [isHoldingsLoading, setHoldingsLoading] = useState(false);
+  const [isMarketPricesLoading, setMarketPricesLoading] = useState(false);
   const [isHoldingsDirty, setHoldingsDirty] = useState(false);
   const [isHoldingsSaving, setHoldingsSaving] = useState(false);
+  const [notes, setNotesState] = useState("");
+  const [notesMeta, setNotesMeta] = useState<{ updatedAt: string | null }>({ updatedAt: null });
+  const [isNotesLoading, setNotesLoading] = useState(false);
+  const [isNotesSaving, setNotesSaving] = useState(false);
+  const [isNotesDirty, setNotesDirty] = useState(false);
   const [capitalEntries, setCapitalEntries] = useState<InvestingCapitalEntry[]>([]);
   const [capitalEntriesMeta, setCapitalEntriesMeta] = useState<{ updatedAt: string | null }>({
     updatedAt: null,
   });
+  const [activities, setActivities] = useState<InvestingActivity[]>([]);
+  const [activitiesSummary, setActivitiesSummary] = useState<InvestingActivityYearSummary[]>([]);
+  const [activitiesMeta, setActivitiesMeta] = useState<{ updatedAt: string | null }>({ updatedAt: null });
+  const [isActivitiesLoading, setActivitiesLoading] = useState(false);
+  const [isActivitiesSaving, setActivitiesSaving] = useState(false);
+  const [isActivitiesDirty, setActivitiesDirty] = useState(false);
   const [isCapitalEntriesLoading, setCapitalEntriesLoading] = useState(false);
   const [isCapitalEntriesDirty, setCapitalEntriesDirty] = useState(false);
   const [isCapitalEntriesSaving, setCapitalEntriesSaving] = useState(false);
 
-  const [metrics, setMetricsState] = useState<{ divYieldPercent: string; beta: string }>(() => {
-    return { divYieldPercent: "—", beta: "—" };
+  const [metrics, setMetricsState] = useState<{
+    divYieldPercent: string;
+    beta: string;
+    allocationPercent: Record<string, string>;
+  }>(() => {
+    return { divYieldPercent: "—", beta: "—", allocationPercent: {} };
   });
   const [isMetricsLoading, setMetricsLoading] = useState(false);
 
@@ -117,8 +203,27 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
         "/investing/holdings",
         { token },
       );
+      let hydratedHoldings = normalizeHoldings(res.holdings);
+      const uniqueTickers = Array.from(
+        new Set(
+          hydratedHoldings
+            .map((h) => (h.ticker ?? "").trim().toUpperCase())
+            .filter((ticker) => ticker.length > 0),
+        ),
+      );
+      if (uniqueTickers.length > 0) {
+        try {
+          const quoteRes = await apiFetch<{ prices: Record<string, number> }>(
+            `/investing/quotes?tickers=${encodeURIComponent(uniqueTickers.join(","))}`,
+            { token },
+          );
+          hydratedHoldings = applyMarketPrices(hydratedHoldings, quoteRes.prices ?? {});
+        } catch {
+          // Keep persisted holdings if quote provider is unavailable.
+        }
+      }
       if (res.holdings.length > 0) {
-        setHoldings(normalizeHoldings(res.holdings));
+        setHoldings(hydratedHoldings);
         setHoldingsMeta({ source: "server", updatedAt: res.updated_at });
       } else {
         setHoldings([]);
@@ -127,6 +232,29 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
       setHoldingsDirty(false);
     } finally {
       setHoldingsLoading(false);
+    }
+  }
+
+  async function refreshMarketPrices() {
+    if (!token) return;
+    const uniqueTickers = Array.from(
+      new Set(
+        holdings
+          .map((h) => (h.ticker ?? "").trim().toUpperCase())
+          .filter((ticker) => ticker.length > 0),
+      ),
+    );
+    if (uniqueTickers.length === 0) return;
+    setMarketPricesLoading(true);
+    try {
+      const res = await apiFetch<{ prices: Record<string, number> }>(
+        `/investing/quotes?tickers=${encodeURIComponent(uniqueTickers.join(","))}`,
+        { token },
+      );
+      setHoldings((prev) => applyMarketPrices(prev, res.prices ?? {}));
+      await refreshMetrics();
+    } finally {
+      setMarketPricesLoading(false);
     }
   }
 
@@ -148,6 +276,89 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
       setCapitalEntriesDirty(false);
     } finally {
       setCapitalEntriesLoading(false);
+    }
+  }
+
+  async function refreshActivities() {
+    if (!token) {
+      setActivities([]);
+      setActivitiesSummary([]);
+      setActivitiesMeta({ updatedAt: null });
+      setActivitiesDirty(false);
+      return;
+    }
+    setActivitiesLoading(true);
+    try {
+      const res = await apiFetch<{
+        activities: InvestingActivity[];
+        yearly_summary: InvestingActivityYearSummary[];
+        updated_at: string | null;
+      }>("/investing/activities", { token });
+      setActivities(res.activities ?? []);
+      setActivitiesSummary(res.yearly_summary ?? []);
+      setActivitiesMeta({ updatedAt: res.updated_at ?? null });
+      setActivitiesDirty(false);
+    } finally {
+      setActivitiesLoading(false);
+    }
+  }
+
+  async function saveActivities() {
+    if (!token || !isActivitiesDirty) return;
+    setActivitiesSaving(true);
+    try {
+      const res = await apiFetch<{
+        activities: InvestingActivity[];
+        yearly_summary: InvestingActivityYearSummary[];
+        updated_at: string | null;
+      }>("/investing/activities", {
+        token,
+        method: "PUT",
+        body: JSON.stringify({ activities }),
+      });
+      setActivities(res.activities ?? []);
+      setActivitiesSummary(res.yearly_summary ?? []);
+      setActivitiesMeta({ updatedAt: res.updated_at ?? null });
+      setActivitiesDirty(false);
+    } finally {
+      setActivitiesSaving(false);
+    }
+  }
+
+  async function refreshNotes() {
+    if (!token) {
+      setNotesState("");
+      setNotesMeta({ updatedAt: null });
+      setNotesDirty(false);
+      return;
+    }
+    setNotesLoading(true);
+    try {
+      const res = await apiFetch<{ notes: string; updated_at: string | null }>("/investing/notes", {
+        token,
+      });
+      setNotesState(res.notes ?? "");
+      setNotesMeta({ updatedAt: res.updated_at ?? null });
+      setNotesDirty(false);
+    } finally {
+      setNotesLoading(false);
+    }
+  }
+
+  async function saveNotes() {
+    if (!token || !isNotesDirty) return;
+    setNotesSaving(true);
+    try {
+      const res = await apiFetch<{ notes: string; updated_at: string | null }>("/investing/notes", {
+        token,
+        method: "PUT",
+        body: JSON.stringify({ notes }),
+      });
+      setNotesState(res.notes ?? "");
+      setNotesMeta({ updatedAt: res.updated_at ?? null });
+      setNotesDirty(false);
+    } finally {
+      setNotesSaving(false);
     }
   }
 
@@ -189,6 +400,7 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
       });
       setHoldingsMeta({ source: "server", updatedAt: res.updated_at ?? null });
       setHoldingsDirty(false);
+      await refreshMetrics();
     } finally {
       setHoldingsSaving(false);
     }
@@ -196,37 +408,55 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
 
   async function refreshMetrics() {
     if (!token) {
-      setMetricsState({ divYieldPercent: "—", beta: "—" });
+      setMetricsState({ divYieldPercent: "—", beta: "—", allocationPercent: {} });
       return;
     }
     setMetricsLoading(true);
     try {
-      const res = await apiFetch<{ div_yield_percent: string; beta: string }>("/investing/metrics", {
-        token,
+      const res = await apiFetch<{
+        div_yield_percent: string;
+        beta: string;
+        allocation_percent?: Record<string, string>;
+      }>("/investing/metrics", { token });
+      setMetricsState({
+        divYieldPercent: res.div_yield_percent,
+        beta: res.beta,
+        allocationPercent: res.allocation_percent ?? {},
       });
-      setMetricsState({ divYieldPercent: res.div_yield_percent, beta: res.beta });
     } finally {
       setMetricsLoading(false);
     }
   }
 
-  async function updateMetrics(patch: Partial<{ divYieldPercent: string; beta: string }>) {
+  async function updateMetrics(
+    patch: Partial<{ divYieldPercent: string; beta: string; allocationPercent: Record<string, string> }>,
+  ) {
     if (!token) return;
     const payload = {
       div_yield_percent: patch.divYieldPercent,
       beta: patch.beta,
     };
-    const res = await apiFetch<{ div_yield_percent: string; beta: string }>("/investing/metrics", {
+    const res = await apiFetch<{
+      div_yield_percent: string;
+      beta: string;
+      allocation_percent?: Record<string, string>;
+    }>("/investing/metrics", {
       token,
       method: "PUT",
       body: JSON.stringify(payload),
     });
-    setMetricsState({ divYieldPercent: res.div_yield_percent, beta: res.beta });
+    setMetricsState({
+      divYieldPercent: res.div_yield_percent,
+      beta: res.beta,
+      allocationPercent: res.allocation_percent ?? {},
+    });
   }
 
   useEffect(() => {
     void refreshHoldings().catch(() => {});
+    void refreshActivities().catch(() => {});
     void refreshCapitalEntries().catch(() => {});
+    void refreshNotes().catch(() => {});
     void refreshMetrics().catch(() => {});
   }, [token]);
 
@@ -236,12 +466,24 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
       holdingsMeta,
       capitalEntries,
       capitalEntriesMeta,
+      activities,
+      activitiesSummary,
+      activitiesMeta,
+      isActivitiesLoading,
+      isActivitiesSaving,
+      isActivitiesDirty,
       isCapitalEntriesLoading,
       isCapitalEntriesDirty,
       isCapitalEntriesSaving,
       metrics,
       isMetricsLoading,
       isHoldingsLoading,
+      isMarketPricesLoading,
+      notes,
+      notesMeta,
+      isNotesLoading,
+      isNotesSaving,
+      isNotesDirty,
       isHoldingsDirty,
       isHoldingsSaving,
       updateHolding: (id, patch) => {
@@ -285,10 +527,50 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
         setCapitalEntriesDirty(true);
         setCapitalEntries((prev) => prev.filter((e) => e.id !== id));
       },
+      updateActivity: (id, patch) => {
+        setActivitiesDirty(true);
+        setActivities((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+      },
+      addActivity: (type) => {
+        setActivitiesDirty(true);
+        setActivities((prev) => [
+          {
+            id:
+              typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? crypto.randomUUID()
+                : `${Date.now()}`,
+            type,
+            name: "",
+            ticker: "",
+            category: "",
+            count: 0,
+            price: "0",
+            currency: "USD",
+            amount: "0",
+            gains_losses: "0",
+            commission: "0",
+            date: "",
+          },
+          ...prev,
+        ]);
+      },
+      deleteActivity: (id) => {
+        setActivitiesDirty(true);
+        setActivities((prev) => prev.filter((a) => a.id !== id));
+      },
+      refreshActivities,
+      saveActivities,
       refreshCapitalEntries,
       saveCapitalEntries,
       refreshHoldings,
+      refreshMarketPrices,
       saveHoldings,
+      setNotes: (next) => {
+        setNotesState(next);
+        setNotesDirty(true);
+      },
+      refreshNotes,
+      saveNotes,
       refreshMetrics,
       updateMetrics,
     };
@@ -297,12 +579,24 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
     holdingsMeta,
     capitalEntries,
     capitalEntriesMeta,
+    activities,
+    activitiesSummary,
+    activitiesMeta,
+    isActivitiesLoading,
+    isActivitiesSaving,
+    isActivitiesDirty,
     isCapitalEntriesLoading,
     isCapitalEntriesDirty,
     isCapitalEntriesSaving,
     metrics,
     isMetricsLoading,
     isHoldingsLoading,
+    isMarketPricesLoading,
+    notes,
+    notesMeta,
+    isNotesLoading,
+    isNotesSaving,
+    isNotesDirty,
     isHoldingsDirty,
     isHoldingsSaving,
   ]);

@@ -42,7 +42,10 @@ export function PortfolioSummary() {
 
   const summary = useMemo(() => {
     const value = holdings.reduce((a, h) => a + parseUsd(h.marketValue), 0);
-    const cost = holdings.reduce((a, h) => a + h.shares * parseUsd(h.avgBuyPrice), 0);
+    const cost = holdings.reduce(
+      (a, h) => a + h.shares * parseUsd(h.avgBuyPrice),
+      0,
+    );
     const gain = value - cost;
     const gainPct = cost > 0 ? (gain / cost) * 100 : 0;
 
@@ -50,7 +53,6 @@ export function PortfolioSummary() {
   }, [holdings]);
 
   const gainTone = summary.gain >= 0 ? "positive" : "negative";
-
   const [isEditing, setEditing] = useState(false);
   const [draftDivYield, setDraftDivYield] = useState(metrics.divYieldPercent);
   const [draftBeta, setDraftBeta] = useState(metrics.beta);
@@ -92,7 +94,9 @@ export function PortfolioSummary() {
           <p className="text-xs font-medium uppercase tracking-[0.15em] text-[#8f8676]">
             Dashboard
           </p>
-          <p className="mt-1 text-sm font-semibold text-[#1f1c17]">Portfolio summary</p>
+          <p className="mt-1 text-sm font-semibold text-[#1f1c17]">
+            Portfolio summary
+          </p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -132,9 +136,16 @@ export function PortfolioSummary() {
 
       <div className="grid md:grid-cols-2">
         <div className="border-black/10 md:border-r">
-          <StatCell label="Portfolio Value, $" value={formatUsd(summary.value)} />
+          <StatCell
+            label="Portfolio Value, $"
+            value={formatUsd(summary.value)}
+          />
           <StatCell label="Portfolio Cost, $" value={formatUsd(summary.cost)} />
-          <StatCell label="Gain/Loss, $" value={formatUsd(summary.gain)} tone={gainTone} />
+          <StatCell
+            label="Gain/Loss, $"
+            value={formatUsd(summary.gain)}
+            tone={gainTone}
+          />
         </div>
 
         <div>
@@ -184,4 +195,3 @@ export function PortfolioSummary() {
     </section>
   );
 }
-

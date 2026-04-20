@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class InvestingMetricsResponse(BaseModel):
     div_yield_percent: str
     beta: str
+    allocation_percent: dict[str, str] = Field(default_factory=dict)
 
 
 class InvestingMetricsUpdateRequest(BaseModel):
@@ -37,6 +38,20 @@ class InvestingHoldingsUpdateRequest(BaseModel):
     holdings: list[InvestingHolding] = Field(default_factory=list)
 
 
+class InvestingQuotesResponse(BaseModel):
+    prices: dict[str, float] = Field(default_factory=dict)
+    as_of: str | None = None
+
+
+class InvestingNotesResponse(BaseModel):
+    notes: str
+    updated_at: str | None = None
+
+
+class InvestingNotesUpdateRequest(BaseModel):
+    notes: str = Field(default="", max_length=20000)
+
+
 class InvestingCapitalEntry(BaseModel):
     id: str
     date: str
@@ -61,3 +76,41 @@ class InvestingCapitalEntriesResponse(BaseModel):
 class InvestingCapitalEntriesUpdateRequest(BaseModel):
     entries: list[InvestingCapitalEntryInput] = Field(default_factory=list)
 
+
+class InvestingActivity(BaseModel):
+    id: str
+    type: str = "buy"
+    name: str = ""
+    ticker: str = ""
+    category: str = ""
+    count: int = 0
+    price: str = "0"
+    currency: str = "USD"
+    amount: str = "0"
+    gains_losses: str = "0"
+    commission: str = "0"
+    date: str = ""
+    amount_usd: str = "0.00"
+    gains_losses_usd: str = "0.00"
+    commission_usd: str = "0.00"
+    fx_rate_to_usd: str = "1.000000"
+
+
+class InvestingActivityYearSummary(BaseModel):
+    year: str
+    purchases_amount: str
+    purchases_commission: str
+    sales_amount: str
+    sales_pnl: str
+    sales_commission: str
+    net_cash_flow: str
+
+
+class InvestingActivitiesResponse(BaseModel):
+    activities: list[InvestingActivity]
+    yearly_summary: list[InvestingActivityYearSummary]
+    updated_at: str | None = None
+
+
+class InvestingActivitiesUpdateRequest(BaseModel):
+    activities: list[InvestingActivity] = Field(default_factory=list)

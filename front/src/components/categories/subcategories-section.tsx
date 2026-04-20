@@ -9,7 +9,7 @@ type SubcategoriesSectionProps = {
 };
 
 function hrefForSubcategory(categorySlug: string, subSlug: string) {
-  if (categorySlug === "investing" && ["dashboard", "table", "notes", "analytics"].includes(subSlug)) {
+  if (categorySlug === "investing" && ["dashboard", "table", "notes", "analytics", "activities"].includes(subSlug)) {
     if (subSlug === "table") return "/investing/holdings";
     return `/investing/${subSlug}`;
   }

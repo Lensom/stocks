@@ -1,5 +1,6 @@
 import { RequireAuth } from "@/components/auth/require-auth";
 import { SubcategoriesSection } from "@/components/categories/subcategories-section";
+import Link from "next/link";
 
 export default function InvestingPage() {
   return (
@@ -13,14 +14,19 @@ export default function InvestingPage() {
             Investing
           </h1>
           <p className="mt-4 max-w-2xl text-base leading-7 text-[#655d51]">
-            Prototype workspace for portfolio tracking. Everything here is mock data
-            (no API calls) so we can iterate on UX fast.
+            Portfolio workspace with live API-driven holdings, market quotes and portfolio metrics.
           </p>
 
           <div className="mt-5 flex flex-wrap gap-2.5">
             <span className="rounded-full border border-black/10 bg-white/70 px-3 py-1 text-xs font-medium text-[#6f675b]">
-              Rebalance: mock rule
+              Rebalance: working draft
             </span>
+            <Link
+              href="/investing/activities"
+              className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium text-[#3b352d] hover:bg-[#faf8f2]"
+            >
+              Open Activities
+            </Link>
           </div>
         </section>
 

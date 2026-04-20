@@ -78,6 +78,26 @@ def _require_category_owner(conn: Connection, *, user_id: int, category_id: int)
         raise HTTPException(status_code=404, detail="Category not found")
 
 
+def _ensure_investing_defaults(conn: Connection, *, user_id: int, category_id: int) -> None:
+    category = conn.execute(
+        "SELECT slug FROM categories WHERE id = %s AND user_id = %s",
+        (category_id, user_id),
+    ).fetchone()
+    if not category or category[0] != "investing":
+        return
+
+    # Keep Activities always visible in Investing navigation.
+    conn.execute(
+        """
+        INSERT INTO subcategories(user_id, category_id, name, slug)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (category_id, slug) DO NOTHING
+        """,
+        (user_id, category_id, "Activities", "activities"),
+    )
+    conn.commit()
+
+
 @router.get("/{category_id}/subcategories", response_model=list[SubcategoryResponse])
 def list_subcategories(
     category_id: int,
@@ -85,6 +105,7 @@ def list_subcategories(
     conn: Annotated[Connection, Depends(get_conn)],
 ):
     _require_category_owner(conn, user_id=user.id, category_id=category_id)
+    _ensure_investing_defaults(conn, user_id=user.id, category_id=category_id)
     rows = conn.execute(
         """
         SELECT id, category_id, name, slug

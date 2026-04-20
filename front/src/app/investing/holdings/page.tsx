@@ -23,11 +23,16 @@ export default function InvestingTablePage() {
   const {
     holdings,
     holdingsMeta,
+    metrics,
+    isMetricsLoading,
+    refreshMetrics,
     updateHolding,
     addHolding,
     deleteHolding,
     reset,
     saveHoldings,
+    refreshMarketPrices,
+    isMarketPricesLoading,
     isHoldingsDirty,
     isHoldingsSaving,
   } = useInvesting();
@@ -125,9 +130,39 @@ export default function InvestingTablePage() {
             Source {holdingsMeta.source}
             {holdingsMeta.updatedAt ? ` · synced ${new Date(holdingsMeta.updatedAt).toLocaleString()}` : ""}
           </span>
+          <span className="rounded-full border border-black/10 bg-white/70 px-3 py-1">
+            Div Yield {isMetricsLoading ? "…" : metrics.divYieldPercent}
+          </span>
+          <span className="rounded-full border border-black/10 bg-white/70 px-3 py-1">
+            Beta {isMetricsLoading ? "…" : metrics.beta}
+          </span>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => void refreshMarketPrices().catch(() => {})}
+            disabled={isMarketPricesLoading}
+            className={[
+              "rounded-full px-3.5 py-1.5 text-xs font-medium transition",
+              isMarketPricesLoading
+                ? "cursor-not-allowed bg-black/10 text-[#6f675b]"
+                : "border border-black/10 bg-white text-[#3b352d] hover:bg-[#faf8f2]",
+            ].join(" ")}
+          >
+            {isMarketPricesLoading ? "Refreshing…" : "Refresh market"}
+          </button>
+          <button
+            onClick={() => void refreshMetrics().catch(() => {})}
+            disabled={isMetricsLoading}
+            className={[
+              "rounded-full px-3.5 py-1.5 text-xs font-medium transition",
+              isMetricsLoading
+                ? "cursor-not-allowed bg-black/10 text-[#6f675b]"
+                : "border border-black/10 bg-white text-[#3b352d] hover:bg-[#faf8f2]",
+            ].join(" ")}
+          >
+            {isMetricsLoading ? "Refreshing metrics…" : "Refresh metrics"}
+          </button>
           <div className="flex rounded-full border border-black/10 bg-white p-1">
             <button
               type="button"

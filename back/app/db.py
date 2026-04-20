@@ -73,5 +73,23 @@ def init_db(pool: ConnectionPool) -> None:
             );
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS investing_notes (
+                user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                notes TEXT NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS investing_activities (
+                user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                activities JSONB NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
         conn.commit()
 
