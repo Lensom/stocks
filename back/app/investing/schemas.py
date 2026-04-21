@@ -114,3 +114,30 @@ class InvestingActivitiesResponse(BaseModel):
 
 class InvestingActivitiesUpdateRequest(BaseModel):
     activities: list[InvestingActivity] = Field(default_factory=list)
+
+
+class InvestingPickingRow(BaseModel):
+    id: str
+    name: str = ""
+    ticker: str = ""
+    industry: str = ""
+    pe: str = ""
+    eps: str = ""
+    beta: str = ""
+    div_yield: str = ""
+    current_price: str = ""
+    strong_buy_until: str = ""
+    may_buy_until: str = ""
+    buy_right_now: str = ""
+    price_goal_1y: str = ""
+    price_goal_5y: str = ""
+    reports: str = ""
+
+
+class InvestingPickingResponse(BaseModel):
+    rows: list[InvestingPickingRow]
+    updated_at: str | None = None
+
+
+class InvestingPickingUpdateRequest(BaseModel):
+    rows: list[InvestingPickingRow] = Field(default_factory=list)

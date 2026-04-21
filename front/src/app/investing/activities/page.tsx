@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useInvesting } from "@/state/investing-store";
 
 function inputBaseClasses() {
@@ -30,6 +30,9 @@ export default function InvestingActivitiesPage() {
     () => activities.filter((a) => a.type === "sell"),
     [activities],
   );
+  const [isYearlyOpen, setYearlyOpen] = useState(true);
+  const [isPurchasesOpen, setPurchasesOpen] = useState(true);
+  const [isSalesOpen, setSalesOpen] = useState(true);
 
   function renderTable(rows: typeof activities, kind: "buy" | "sell") {
     return (
@@ -259,8 +262,18 @@ export default function InvestingActivitiesPage() {
       </div>
 
       <section className="space-y-2">
-        <h2 className="text-sm font-semibold text-[#1f1c17]">Yearly totals</h2>
-        <div className="overflow-x-auto rounded-xl border border-black/5">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-[#1f1c17]">Yearly totals</h2>
+          <button
+            type="button"
+            onClick={() => setYearlyOpen((v) => !v)}
+            className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium text-[#3b352d] hover:bg-[#faf8f2]"
+          >
+            {isYearlyOpen ? "Hide" : "Show"}
+          </button>
+        </div>
+        {isYearlyOpen ? (
+          <div className="overflow-x-auto rounded-xl border border-black/5">
           <table className="w-full min-w-[860px] border-collapse text-left text-sm">
             <thead className="bg-[#f4efe4] text-xs text-[#7f7668]">
               <tr>
@@ -313,17 +326,36 @@ export default function InvestingActivitiesPage() {
               ) : null}
             </tbody>
           </table>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-[#1f1c17]">Purchases</h2>
+          <button
+            type="button"
+            onClick={() => setPurchasesOpen((v) => !v)}
+            className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium text-[#3b352d] hover:bg-[#faf8f2]"
+          >
+            {isPurchasesOpen ? "Hide" : "Show"}
+          </button>
         </div>
+        {isPurchasesOpen ? renderTable(purchases, "buy") : null}
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-sm font-semibold text-[#1f1c17]">Purchases</h2>
-        {renderTable(purchases, "buy")}
-      </section>
-
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold text-[#1f1c17]">Sales</h2>
-        {renderTable(sales, "sell")}
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-[#1f1c17]">Sales</h2>
+          <button
+            type="button"
+            onClick={() => setSalesOpen((v) => !v)}
+            className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium text-[#3b352d] hover:bg-[#faf8f2]"
+          >
+            {isSalesOpen ? "Hide" : "Show"}
+          </button>
+        </div>
+        {isSalesOpen ? renderTable(sales, "sell") : null}
       </section>
     </div>
   );

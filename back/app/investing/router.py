@@ -29,6 +29,9 @@ from app.investing.schemas import (
     InvestingQuotesResponse,
     InvestingNotesResponse,
     InvestingNotesUpdateRequest,
+    InvestingPickingResponse,
+    InvestingPickingRow,
+    InvestingPickingUpdateRequest,
 )
 
 
@@ -688,4 +691,43 @@ def update_activities(
     enriched = _enrich_activities_with_usd(activities_json)
     summary = _calc_activity_yearly_summary(enriched)
     return InvestingActivitiesResponse(activities=enriched, yearly_summary=summary, updated_at=updated_at)
+
+
+@router.get("/picking", response_model=InvestingPickingResponse)
+def get_picking(
+    user: Annotated[UserResponse, Depends(get_current_user)],
+    conn: Annotated[Connection, Depends(get_conn)],
+):
+    row = conn.execute(
+        "SELECT rows, updated_at FROM investing_picking WHERE user_id = %s",
+        (user.id,),
+    ).fetchone()
+    if not row:
+        return InvestingPickingResponse(rows=[], updated_at=None)
+    raw = row[0] if isinstance(row[0], list) else []
+    normalized = [InvestingPickingRow(**r).model_dump() if isinstance(r, dict) else InvestingPickingRow(id=str(r)).model_dump() for r in raw]
+    return InvestingPickingResponse(rows=normalized, updated_at=str(row[1]))
+
+
+@router.put("/picking", response_model=InvestingPickingResponse)
+def update_picking(
+    payload: InvestingPickingUpdateRequest,
+    user: Annotated[UserResponse, Depends(get_current_user)],
+    conn: Annotated[Connection, Depends(get_conn)],
+):
+    rows_json = [r.model_dump() for r in payload.rows]
+    row = conn.execute(
+        """
+        INSERT INTO investing_picking(user_id, rows, updated_at)
+        VALUES (%s, %s, NOW())
+        ON CONFLICT (user_id)
+        DO UPDATE SET rows = EXCLUDED.rows,
+                      updated_at = NOW()
+        RETURNING updated_at
+        """,
+        (user.id, Json(rows_json)),
+    ).fetchone()
+    conn.commit()
+    updated_at = str(row[0]) if row else None
+    return InvestingPickingResponse(rows=rows_json, updated_at=updated_at)
 

@@ -228,6 +228,7 @@ export default function InvestingTablePage() {
                   Ticker <span>{sortArrow("ticker")}</span>
                 </button>
               </th>
+              <th className="w-[180px] px-2 py-2 text-left font-medium">Name</th>
               <th className="w-[80px] px-2 py-2 text-left font-medium">
                 <button type="button" onClick={() => toggleSort("targetWeight")} className="inline-flex items-center gap-1">
                   Target <span>{sortArrow("targetWeight")}</span>
@@ -294,6 +295,14 @@ export default function InvestingTablePage() {
                         onChange={(e) => updateHolding(h.id, { ticker: e.target.value.toUpperCase() })}
                         className={`${inputBaseClasses()} font-semibold`}
                         placeholder="AAPL"
+                      />
+                    </td>
+                    <td className="px-2 py-2">
+                      <input
+                        value={h.name}
+                        onChange={(e) => updateHolding(h.id, { name: e.target.value })}
+                        className={inputBaseClasses()}
+                        placeholder="Company name"
                       />
                     </td>
                     <td className="px-2 py-2 text-left">
@@ -388,6 +397,7 @@ export default function InvestingTablePage() {
                       {expandedRowIds[h.id] ? "−" : "+"}
                     </td>
                     <td className="px-2 py-2 text-sm font-semibold text-[#2f2922]">{h.ticker}</td>
+                    <td className="px-2 py-2 text-sm text-[#2f2922]">{h.name}</td>
                     <td className="px-2 py-2 text-left text-sm tabular-nums text-[#2f2922] whitespace-nowrap">
                       {formatPercent(parsePercent(h.targetWeight))}
                     </td>
@@ -421,18 +431,9 @@ export default function InvestingTablePage() {
                 </tr>
                 {expandedRowIds[h.id] ? (
                   <tr className="border-t border-black/5 bg-[#faf8f2]/70">
-                    <td colSpan={mode === "edit" ? 10 : 9} className="px-4 py-3 text-sm">
+                    <td colSpan={mode === "edit" ? 11 : 10} className="px-4 py-3 text-sm">
                       {mode === "edit" ? (
                         <div className="grid gap-2 md:grid-cols-2">
-                          <label className="text-xs text-[#6f675b]">
-                            Name
-                            <input
-                              value={h.name}
-                              onChange={(e) => updateHolding(h.id, { name: e.target.value })}
-                              className={`${inputBaseClasses()} mt-1`}
-                              placeholder="Company name"
-                            />
-                          </label>
                           <label className="text-xs text-[#6f675b]">
                             Industry
                             <input
@@ -445,9 +446,6 @@ export default function InvestingTablePage() {
                         </div>
                       ) : (
                         <div className="grid gap-1">
-                          <p className="text-xs text-[#8f8676]">
-                            <span className="font-medium text-[#655d51]">Name:</span> {h.name}
-                          </p>
                           <p className="text-xs text-[#8f8676]">
                             <span className="font-medium text-[#655d51]">Industry:</span> {h.industry}
                           </p>

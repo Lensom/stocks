@@ -58,6 +58,7 @@ export function DonutChart({
   const cx = size / 2;
   const cy = size / 2;
   const r = (size / 2) * 0.72;
+  const totalPercent = total > 0 ? "100%" : "0%";
   const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
 
   function setHover(label: string | null) {
@@ -68,7 +69,7 @@ export function DonutChart({
   }
 
   return (
-    <div className="flex items-center gap-5">
+    <div className="flex flex-wrap items-center gap-5 lg:flex-nowrap">
       <svg
         width={size}
         height={size}
@@ -90,18 +91,45 @@ export function DonutChart({
           />
         ))}
         <circle cx={cx} cy={cy} r={r - 18} fill="#faf8f2" stroke="rgba(0,0,0,0.04)" />
+        <text
+          x={cx}
+          y={cy - 2}
+          textAnchor="middle"
+          className="fill-[#1f1c17] text-[11px] font-semibold"
+        >
+          {hoveredLabel ?? "Total"}
+        </text>
+        <text
+          x={cx}
+          y={cy + 14}
+          textAnchor="middle"
+          className="fill-[#7f7668] text-[10px] font-medium"
+        >
+          {hoveredLabel
+            ? `${(
+                ((normalized.find((s) => s.label === hoveredLabel)?.value ?? 0) / (total || 1)) *
+                100
+              ).toFixed(1)}%`
+            : totalPercent}
+        </text>
       </svg>
 
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <p className="text-xs font-medium uppercase tracking-[0.15em] text-[#8f8676]">
           {title}
         </p>
-        <ul className="mt-2 space-y-1">
+        <ul className="mt-2 space-y-1.5">
           {normalized.map((s) => (
-            <li key={s.label} className="flex items-center justify-between gap-4 text-sm">
+            <li
+              key={s.label}
+              className={[
+                "flex items-center justify-between gap-4 rounded-md px-1.5 py-0.5 text-sm transition",
+                hoveredLabel === s.label ? "bg-[#f4efe4]" : "",
+              ].join(" ")}
+            >
               <span className="flex min-w-0 items-center gap-2">
                 <span
-                  className="h-2.5 w-2.5 rounded-full"
+                  className="h-2.5 w-2.5 shrink-0 rounded-full"
                   style={{ background: s.color }}
                   onMouseEnter={() => setHover(s.label)}
                   onMouseLeave={() => setHover(null)}

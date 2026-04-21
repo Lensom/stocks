@@ -77,7 +77,7 @@ export function Sidebar() {
                         {subs.map((sub) => {
                           const childHref =
                             cat.slug === "investing" &&
-                            ["dashboard", "table", "notes", "analytics", "activities"].includes(sub.slug)
+                            ["dashboard", "table", "notes", "analytics", "activities", "picking"].includes(sub.slug)
                               ? sub.slug === "table"
                                 ? "/investing/holdings"
                                 : `/investing/${sub.slug}`

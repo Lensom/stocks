@@ -44,6 +44,24 @@ export type InvestingActivityYearSummary = {
   net_cash_flow: string;
 };
 
+export type InvestingPickingRow = {
+  id: string;
+  name: string;
+  ticker: string;
+  industry: string;
+  pe: string;
+  eps: string;
+  beta: string;
+  div_yield: string;
+  current_price: string;
+  strong_buy_until: string;
+  may_buy_until: string;
+  buy_right_now: string;
+  price_goal_1y: string;
+  price_goal_5y: string;
+  reports: string;
+};
+
 type InvestingStore = {
   holdings: InvestingHolding[];
   holdingsMeta: { source: "server" | "default"; updatedAt: string | null };
@@ -52,6 +70,11 @@ type InvestingStore = {
   activities: InvestingActivity[];
   activitiesSummary: InvestingActivityYearSummary[];
   activitiesMeta: { updatedAt: string | null };
+  pickingRows: InvestingPickingRow[];
+  pickingMeta: { updatedAt: string | null };
+  isPickingLoading: boolean;
+  isPickingSaving: boolean;
+  isPickingDirty: boolean;
   isActivitiesLoading: boolean;
   isActivitiesSaving: boolean;
   isActivitiesDirty: boolean;
@@ -79,6 +102,11 @@ type InvestingStore = {
   updateActivity: (id: string, patch: Partial<InvestingActivity>) => void;
   addActivity: (type: "buy" | "sell") => void;
   deleteActivity: (id: string) => void;
+  updatePickingRow: (id: string, patch: Partial<InvestingPickingRow>) => void;
+  addPickingRow: () => void;
+  deletePickingRow: (id: string) => void;
+  refreshPicking: () => Promise<void>;
+  savePicking: () => Promise<void>;
   refreshActivities: () => Promise<void>;
   saveActivities: () => Promise<void>;
   refreshCapitalEntries: () => Promise<void>;
@@ -174,6 +202,11 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
   const [activities, setActivities] = useState<InvestingActivity[]>([]);
   const [activitiesSummary, setActivitiesSummary] = useState<InvestingActivityYearSummary[]>([]);
   const [activitiesMeta, setActivitiesMeta] = useState<{ updatedAt: string | null }>({ updatedAt: null });
+  const [pickingRows, setPickingRows] = useState<InvestingPickingRow[]>([]);
+  const [pickingMeta, setPickingMeta] = useState<{ updatedAt: string | null }>({ updatedAt: null });
+  const [isPickingLoading, setPickingLoading] = useState(false);
+  const [isPickingSaving, setPickingSaving] = useState(false);
+  const [isPickingDirty, setPickingDirty] = useState(false);
   const [isActivitiesLoading, setActivitiesLoading] = useState(false);
   const [isActivitiesSaving, setActivitiesSaving] = useState(false);
   const [isActivitiesDirty, setActivitiesDirty] = useState(false);
@@ -325,6 +358,47 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function refreshPicking() {
+    if (!token) {
+      setPickingRows([]);
+      setPickingMeta({ updatedAt: null });
+      setPickingDirty(false);
+      return;
+    }
+    setPickingLoading(true);
+    try {
+      const res = await apiFetch<{ rows: InvestingPickingRow[]; updated_at: string | null }>(
+        "/investing/picking",
+        { token },
+      );
+      setPickingRows(res.rows ?? []);
+      setPickingMeta({ updatedAt: res.updated_at ?? null });
+      setPickingDirty(false);
+    } finally {
+      setPickingLoading(false);
+    }
+  }
+
+  async function savePicking() {
+    if (!token || !isPickingDirty) return;
+    setPickingSaving(true);
+    try {
+      const res = await apiFetch<{ rows: InvestingPickingRow[]; updated_at: string | null }>(
+        "/investing/picking",
+        {
+          token,
+          method: "PUT",
+          body: JSON.stringify({ rows: pickingRows }),
+        },
+      );
+      setPickingRows(res.rows ?? []);
+      setPickingMeta({ updatedAt: res.updated_at ?? null });
+      setPickingDirty(false);
+    } finally {
+      setPickingSaving(false);
+    }
+  }
+
   async function refreshNotes() {
     if (!token) {
       setNotesState("");
@@ -455,6 +529,7 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refreshHoldings().catch(() => {});
     void refreshActivities().catch(() => {});
+    void refreshPicking().catch(() => {});
     void refreshCapitalEntries().catch(() => {});
     void refreshNotes().catch(() => {});
     void refreshMetrics().catch(() => {});
@@ -469,6 +544,11 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
       activities,
       activitiesSummary,
       activitiesMeta,
+      pickingRows,
+      pickingMeta,
+      isPickingLoading,
+      isPickingSaving,
+      isPickingDirty,
       isActivitiesLoading,
       isActivitiesSaving,
       isActivitiesDirty,
@@ -558,6 +638,42 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
         setActivitiesDirty(true);
         setActivities((prev) => prev.filter((a) => a.id !== id));
       },
+      updatePickingRow: (id, patch) => {
+        setPickingDirty(true);
+        setPickingRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+      },
+      addPickingRow: () => {
+        setPickingDirty(true);
+        setPickingRows((prev) => [
+          {
+            id:
+              typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? crypto.randomUUID()
+                : `${Date.now()}`,
+            name: "",
+            ticker: "",
+            industry: "",
+            pe: "",
+            eps: "",
+            beta: "",
+            div_yield: "",
+            current_price: "",
+            strong_buy_until: "",
+            may_buy_until: "",
+            buy_right_now: "",
+            price_goal_1y: "",
+            price_goal_5y: "",
+            reports: "",
+          },
+          ...prev,
+        ]);
+      },
+      deletePickingRow: (id) => {
+        setPickingDirty(true);
+        setPickingRows((prev) => prev.filter((r) => r.id !== id));
+      },
+      refreshPicking,
+      savePicking,
       refreshActivities,
       saveActivities,
       refreshCapitalEntries,
@@ -582,6 +698,11 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
     activities,
     activitiesSummary,
     activitiesMeta,
+    pickingRows,
+    pickingMeta,
+    isPickingLoading,
+    isPickingSaving,
+    isPickingDirty,
     isActivitiesLoading,
     isActivitiesSaving,
     isActivitiesDirty,

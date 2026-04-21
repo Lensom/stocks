@@ -86,15 +86,19 @@ def _ensure_investing_defaults(conn: Connection, *, user_id: int, category_id: i
     if not category or category[0] != "investing":
         return
 
-    # Keep Activities always visible in Investing navigation.
-    conn.execute(
-        """
-        INSERT INTO subcategories(user_id, category_id, name, slug)
-        VALUES (%s, %s, %s, %s)
-        ON CONFLICT (category_id, slug) DO NOTHING
-        """,
-        (user_id, category_id, "Activities", "activities"),
-    )
+    defaults = [
+        ("Activities", "activities"),
+        ("Picking", "picking"),
+    ]
+    for name, slug in defaults:
+        conn.execute(
+            """
+            INSERT INTO subcategories(user_id, category_id, name, slug)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (category_id, slug) DO NOTHING
+            """,
+            (user_id, category_id, name, slug),
+        )
     conn.commit()
 
 

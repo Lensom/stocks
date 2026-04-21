@@ -198,10 +198,11 @@ export default function InvestingDashboardPage() {
       <section className="grid gap-4 md:grid-cols-2">
         <article className="rounded-2xl border border-black/5 bg-white/90 p-5 shadow-[0_8px_30px_rgba(18,16,13,0.05)]">
           <h2 className="text-sm font-semibold text-[#1f1c17]">Allocation by holdings</h2>
-          <div className="mt-3">
+          <div className="mt-3 min-h-[240px]">
             <DonutChart
               title="By stocks"
               slices={allocationSlices}
+              size={200}
               onChartClick={() => {
                 setHoveredSliceLabel(null);
                 setChartModal("allocation");
@@ -211,10 +212,11 @@ export default function InvestingDashboardPage() {
         </article>
         <article className="rounded-2xl border border-black/5 bg-white/90 p-5 shadow-[0_8px_30px_rgba(18,16,13,0.05)]">
           <h2 className="text-sm font-semibold text-[#1f1c17]">Target by stocks</h2>
-          <div className="mt-3">
+          <div className="mt-3 min-h-[240px]">
             <DonutChart
               title="Target allocation"
               slices={targetSlices}
+              size={200}
               onChartClick={() => {
                 setHoveredSliceLabel(null);
                 setChartModal("target");
