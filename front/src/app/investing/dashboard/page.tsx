@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useInvesting } from "@/state/investing-store";
 import { parsePercent, parseUsd } from "@/features/investing/format";
@@ -153,24 +152,6 @@ export default function InvestingDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-[0.15em] text-[#8f8676]">
-            Investing
-          </p>
-          <h1 className="mt-1.5 text-3xl font-semibold text-[#1f1c17]">Dashboard</h1>
-          <p className="mt-1.5 text-sm text-[#655d51]">
-            Mock metrics to shape the UX.
-          </p>
-        </div>
-        <Link
-          href="/investing"
-          className="rounded-full border border-black/10 bg-white px-3.5 py-1.5 text-xs font-medium text-[#3b352d]"
-        >
-          Back
-        </Link>
-      </div>
-
       <PortfolioSummary />
 
       <section className="grid gap-4 md:grid-cols-3">

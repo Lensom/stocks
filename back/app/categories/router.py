@@ -12,6 +12,7 @@ from app.categories.schemas import (
     CategoryCreateRequest,
     CategoryResponse,
     SubcategoryCreateRequest,
+    SubcategoryReorderRequest,
     SubcategoryResponse,
 )
 
@@ -78,6 +79,49 @@ def _require_category_owner(conn: Connection, *, user_id: int, category_id: int)
         raise HTTPException(status_code=404, detail="Category not found")
 
 
+def _next_subcategory_sort_order(conn: Connection, *, user_id: int, category_id: int) -> int:
+    row = conn.execute(
+        """
+        SELECT COALESCE(MAX(sort_order), 0)
+        FROM subcategories
+        WHERE user_id = %s AND category_id = %s
+        """,
+        (user_id, category_id),
+    ).fetchone()
+    return int(row[0]) + 10 if row and row[0] is not None else 10
+
+
+def _backfill_subcategory_sort_orders_if_all_zero(
+    conn: Connection, *, user_id: int, category_id: int
+) -> None:
+    agg = conn.execute(
+        """
+        SELECT COUNT(*) FILTER (WHERE COALESCE(sort_order, 0) = 0), COUNT(*)
+        FROM subcategories
+        WHERE user_id = %s AND category_id = %s
+        """,
+        (user_id, category_id),
+    ).fetchone()
+    if not agg or int(agg[1]) == 0:
+        return
+    if int(agg[0]) != int(agg[1]):
+        return
+    rows = conn.execute(
+        """
+        SELECT id FROM subcategories
+        WHERE user_id = %s AND category_id = %s
+        ORDER BY created_at ASC, id ASC
+        """,
+        (user_id, category_id),
+    ).fetchall()
+    for i, (sid,) in enumerate(rows):
+        conn.execute(
+            "UPDATE subcategories SET sort_order = %s WHERE id = %s AND user_id = %s",
+            ((i + 1) * 10, int(sid), user_id),
+        )
+    conn.commit()
+
+
 def _ensure_investing_defaults(conn: Connection, *, user_id: int, category_id: int) -> None:
     category = conn.execute(
         "SELECT slug FROM categories WHERE id = %s AND user_id = %s",
@@ -87,17 +131,32 @@ def _ensure_investing_defaults(conn: Connection, *, user_id: int, category_id: i
         return
 
     defaults = [
+        ("Dashboard", "dashboard"),
+        ("Holdings", "table"),
+        ("Notes", "notes"),
+        ("Analytics", "analytics"),
+        ("Finance", "finance"),
         ("Activities", "activities"),
         ("Picking", "picking"),
+        ("Crypto", "crypto"),
     ]
     for name, slug in defaults:
+        exists = conn.execute(
+            """
+            SELECT 1 FROM subcategories
+            WHERE category_id = %s AND slug = %s
+            """,
+            (category_id, slug),
+        ).fetchone()
+        if exists:
+            continue
+        ord_val = _next_subcategory_sort_order(conn, user_id=user_id, category_id=category_id)
         conn.execute(
             """
-            INSERT INTO subcategories(user_id, category_id, name, slug)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (category_id, slug) DO NOTHING
+            INSERT INTO subcategories(user_id, category_id, name, slug, sort_order)
+            VALUES (%s, %s, %s, %s, %s)
             """,
-            (user_id, category_id, name, slug),
+            (user_id, category_id, name, slug, ord_val),
         )
     conn.commit()
 
@@ -110,16 +169,26 @@ def list_subcategories(
 ):
     _require_category_owner(conn, user_id=user.id, category_id=category_id)
     _ensure_investing_defaults(conn, user_id=user.id, category_id=category_id)
+    _backfill_subcategory_sort_orders_if_all_zero(conn, user_id=user.id, category_id=category_id)
     rows = conn.execute(
         """
-        SELECT id, category_id, name, slug
+        SELECT id, category_id, name, slug, sort_order
         FROM subcategories
         WHERE user_id = %s AND category_id = %s
-        ORDER BY created_at DESC
+        ORDER BY sort_order ASC, id ASC
         """,
         (user.id, category_id),
     ).fetchall()
-    return [SubcategoryResponse(id=int(r[0]), category_id=int(r[1]), name=r[2], slug=r[3]) for r in rows]
+    return [
+        SubcategoryResponse(
+            id=int(r[0]),
+            category_id=int(r[1]),
+            name=r[2],
+            slug=r[3],
+            sort_order=int(r[4] if r[4] is not None else 0),
+        )
+        for r in rows
+    ]
 
 
 @router.post("/{category_id}/subcategories", response_model=SubcategoryResponse, status_code=status.HTTP_201_CREATED)
@@ -134,17 +203,73 @@ def create_subcategory(
     base_slug = slugify(name)
     slug = base_slug
 
+    next_ord = conn.execute(
+        """
+        SELECT COALESCE(MAX(sort_order), 0) + 10
+        FROM subcategories
+        WHERE user_id = %s AND category_id = %s
+        """,
+        (user.id, category_id),
+    ).fetchone()
+    ord_val = int(next_ord[0]) if next_ord and next_ord[0] is not None else 10
+
     for i in range(0, 25):
         try:
             row = conn.execute(
-                "INSERT INTO subcategories(user_id, category_id, name, slug) VALUES(%s, %s, %s, %s) RETURNING id",
-                (user.id, category_id, name, slug),
+                """
+                INSERT INTO subcategories(user_id, category_id, name, slug, sort_order)
+                VALUES(%s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (user.id, category_id, name, slug, ord_val),
             ).fetchone()
             conn.commit()
-            return SubcategoryResponse(id=int(row[0]), category_id=category_id, name=name, slug=slug)
+            return SubcategoryResponse(
+                id=int(row[0]), category_id=category_id, name=name, slug=slug, sort_order=ord_val
+            )
         except Exception:
             conn.rollback()
             slug = f"{base_slug}-{i+2}"
 
     raise HTTPException(status_code=409, detail="Could not create subcategory (slug conflict)")
+
+
+@router.put("/{category_id}/subcategories/reorder", response_model=list[SubcategoryResponse])
+def reorder_subcategories(
+    category_id: int,
+    payload: SubcategoryReorderRequest,
+    user: Annotated[UserResponse, Depends(get_current_user)],
+    conn: Annotated[Connection, Depends(get_conn)],
+):
+    _require_category_owner(conn, user_id=user.id, category_id=category_id)
+    ordered = list(dict.fromkeys(payload.ordered_ids))
+    if len(ordered) != len(payload.ordered_ids):
+        raise HTTPException(status_code=400, detail="Duplicate ids in ordered_ids")
+
+    rows = conn.execute(
+        """
+        SELECT id FROM subcategories
+        WHERE user_id = %s AND category_id = %s
+        """,
+        (user.id, category_id),
+    ).fetchall()
+    existing = {int(r[0]) for r in rows}
+    if set(ordered) != existing:
+        raise HTTPException(
+            status_code=400,
+            detail="ordered_ids must contain exactly each subcategory id for this category",
+        )
+
+    for idx, sid in enumerate(ordered):
+        conn.execute(
+            """
+            UPDATE subcategories
+            SET sort_order = %s
+            WHERE id = %s AND user_id = %s AND category_id = %s
+            """,
+            ((idx + 1) * 10, sid, user.id, category_id),
+        )
+    conn.commit()
+
+    return list_subcategories(category_id, user, conn)
 

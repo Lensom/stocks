@@ -5,7 +5,7 @@ import { apiFetch } from "@/lib/api";
 import { useAuth } from "./auth-store";
 
 export type Category = { id: number; name: string; slug: string };
-export type Subcategory = { id: number; category_id: number; name: string; slug: string };
+export type Subcategory = { id: number; category_id: number; name: string; slug: string; sort_order?: number };
 
 type CategoriesStore = {
   categories: Category[];
@@ -16,6 +16,7 @@ type CategoriesStore = {
   create: (name: string) => Promise<void>;
   refreshSubcategories: (categoryId: number) => Promise<void>;
   createSubcategory: (categoryId: number, name: string) => Promise<void>;
+  reorderSubcategories: (categoryId: number, orderedIds: number[]) => Promise<void>;
 };
 
 const CategoriesContext = createContext<CategoriesStore | null>(null);
@@ -74,15 +75,25 @@ export function CategoriesProvider({ children }: { children: ReactNode }) {
   const createSubcategory = useCallback(
     async (categoryId: number, name: string) => {
       if (!token) return;
-      const created = await apiFetch<Subcategory>(`/categories/${categoryId}/subcategories`, {
+      await apiFetch<Subcategory>(`/categories/${categoryId}/subcategories`, {
         token,
         method: "POST",
         body: JSON.stringify({ name }),
       });
-      setSubcategoriesByCategoryId((prev) => ({
-        ...prev,
-        [categoryId]: [created, ...(prev[categoryId] ?? [])],
-      }));
+      await refreshSubcategories(categoryId);
+    },
+    [token, refreshSubcategories],
+  );
+
+  const reorderSubcategories = useCallback(
+    async (categoryId: number, orderedIds: number[]) => {
+      if (!token) return;
+      const res = await apiFetch<Subcategory[]>(`/categories/${categoryId}/subcategories/reorder`, {
+        token,
+        method: "PUT",
+        body: JSON.stringify({ ordered_ids: orderedIds }),
+      });
+      setSubcategoriesByCategoryId((prev) => ({ ...prev, [categoryId]: res }));
     },
     [token],
   );
@@ -108,6 +119,7 @@ export function CategoriesProvider({ children }: { children: ReactNode }) {
         create,
         refreshSubcategories,
         createSubcategory,
+        reorderSubcategories,
       }}
     >
       {children}

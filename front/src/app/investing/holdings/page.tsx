@@ -1,12 +1,38 @@
 "use client";
 
-import Link from "next/link";
 import { Fragment, useMemo, useState } from "react";
-import { useInvesting } from "@/state/investing-store";
 import { formatPercent, formatUsd, parsePercent, parseUsd } from "@/features/investing/format";
+import {
+  investingMetaBadge,
+  investingPageStack,
+  investingPrimarySaveActive,
+  investingPrimarySaveDisabled,
+  investingToolbarBtn,
+} from "@/features/investing/ui/investing-classes";
+import { useInvesting } from "@/state/investing-store";
 
 function inputBaseClasses() {
   return "w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-sm text-[#2f2922] outline-none placeholder:text-[#b0a79a] focus:border-black/20 focus:bg-white";
+}
+
+function parseDayChangePct(s: string | undefined): number {
+  const raw = String(s ?? "").trim();
+  if (!raw || raw === "—") return NaN;
+  const n = Number.parseFloat(raw.replace(/%/g, "").replace(",", "."));
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function sortableDayChange(s: string | undefined): number {
+  const n = parseDayChangePct(s);
+  return Number.isFinite(n) ? n : -1e9;
+}
+
+function dayChangeCellClass(s: string | undefined): string {
+  const n = parseDayChangePct(s);
+  if (!Number.isFinite(n)) return "text-[#6f675b]";
+  if (n > 0) return "text-emerald-700";
+  if (n < 0) return "text-rose-700";
+  return "text-[#6f675b]";
 }
 
 type SortKey =
@@ -16,6 +42,7 @@ type SortKey =
   | "shares"
   | "avgBuyPrice"
   | "marketPrice"
+  | "dayChangePercent"
   | "marketValue"
   | "pnl";
 
@@ -67,6 +94,8 @@ export default function InvestingTablePage() {
           return compareNum(parseUsd(a.avgBuyPrice), parseUsd(b.avgBuyPrice));
         case "marketPrice":
           return compareNum(parseUsd(a.marketPrice), parseUsd(b.marketPrice));
+        case "dayChangePercent":
+          return compareNum(sortableDayChange(a.dayChangePercent), sortableDayChange(b.dayChangePercent));
         case "marketValue":
           return compareNum(parseUsd(a.marketValue), parseUsd(b.marketValue));
         case "pnl":
@@ -96,46 +125,22 @@ export default function InvestingTablePage() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-[0.15em] text-[#8f8676]">
-            Investing
-          </p>
-          <h1 className="mt-1.5 text-3xl font-semibold text-[#1f1c17]">Holdings</h1>
-          <p className="mt-1.5 text-sm text-[#655d51]">
-            Editable spreadsheet-like holdings. Dashboard charts read from this table.
-          </p>
-        </div>
-        <Link
-          href="/investing"
-          className="rounded-full border border-black/10 bg-white px-3.5 py-1.5 text-xs font-medium text-[#3b352d]"
-        >
-          Back
-        </Link>
-      </div>
+    <div className={investingPageStack}>
+      <p className="text-sm text-[#655d51]">
+        Day % is today&apos;s session move from market data — use Refresh market.
+      </p>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-2 text-xs text-[#6f675b]">
-          <span className="rounded-full border border-black/10 bg-white/70 px-3 py-1">
-            Total value {formatUsd(totals.totalValue)}
-          </span>
-          <span className="rounded-full border border-black/10 bg-white/70 px-3 py-1">
-            Target sum {formatPercent(totals.totalTarget)}
-          </span>
-          <span className="rounded-full border border-black/10 bg-white/70 px-3 py-1">
-            Current sum {formatPercent(totals.totalCurrent)}
-          </span>
-          <span className="rounded-full border border-black/10 bg-white/70 px-3 py-1">
+          <span className={investingMetaBadge}>Total value {formatUsd(totals.totalValue)}</span>
+          <span className={investingMetaBadge}>Target sum {formatPercent(totals.totalTarget)}</span>
+          <span className={investingMetaBadge}>Current sum {formatPercent(totals.totalCurrent)}</span>
+          <span className={investingMetaBadge}>
             Source {holdingsMeta.source}
             {holdingsMeta.updatedAt ? ` · synced ${new Date(holdingsMeta.updatedAt).toLocaleString()}` : ""}
           </span>
-          <span className="rounded-full border border-black/10 bg-white/70 px-3 py-1">
-            Div Yield {isMetricsLoading ? "…" : metrics.divYieldPercent}
-          </span>
-          <span className="rounded-full border border-black/10 bg-white/70 px-3 py-1">
-            Beta {isMetricsLoading ? "…" : metrics.beta}
-          </span>
+          <span className={investingMetaBadge}>Div Yield {isMetricsLoading ? "…" : metrics.divYieldPercent}</span>
+          <span className={investingMetaBadge}>Beta {isMetricsLoading ? "…" : metrics.beta}</span>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -143,10 +148,8 @@ export default function InvestingTablePage() {
             onClick={() => void refreshMarketPrices().catch(() => {})}
             disabled={isMarketPricesLoading}
             className={[
-              "rounded-full px-3.5 py-1.5 text-xs font-medium transition",
-              isMarketPricesLoading
-                ? "cursor-not-allowed bg-black/10 text-[#6f675b]"
-                : "border border-black/10 bg-white text-[#3b352d] hover:bg-[#faf8f2]",
+              "transition",
+              isMarketPricesLoading ? investingPrimarySaveDisabled : investingToolbarBtn,
             ].join(" ")}
           >
             {isMarketPricesLoading ? "Refreshing…" : "Refresh market"}
@@ -155,10 +158,8 @@ export default function InvestingTablePage() {
             onClick={() => void refreshMetrics().catch(() => {})}
             disabled={isMetricsLoading}
             className={[
-              "rounded-full px-3.5 py-1.5 text-xs font-medium transition",
-              isMetricsLoading
-                ? "cursor-not-allowed bg-black/10 text-[#6f675b]"
-                : "border border-black/10 bg-white text-[#3b352d] hover:bg-[#faf8f2]",
+              "transition",
+              isMetricsLoading ? investingPrimarySaveDisabled : investingToolbarBtn,
             ].join(" ")}
           >
             {isMetricsLoading ? "Refreshing metrics…" : "Refresh metrics"}
@@ -192,24 +193,16 @@ export default function InvestingTablePage() {
                 onClick={() => void saveHoldings().catch(() => {})}
                 disabled={!isHoldingsDirty || isHoldingsSaving}
                 className={[
-                  "rounded-full px-3.5 py-1.5 text-xs font-medium transition",
-                  !isHoldingsDirty || isHoldingsSaving
-                    ? "cursor-not-allowed bg-black/10 text-[#6f675b]"
-                    : "bg-[#1f1c17] text-[#f8f4eb] hover:bg-[#2c2923]",
+                  "transition",
+                  !isHoldingsDirty || isHoldingsSaving ? investingPrimarySaveDisabled : investingPrimarySaveActive,
                 ].join(" ")}
               >
                 {isHoldingsSaving ? "Saving…" : "Save"}
               </button>
-              <button
-                onClick={addHolding}
-                className="rounded-full bg-[#1f1c17] px-3.5 py-1.5 text-xs font-medium text-[#f8f4eb] transition hover:bg-[#2c2923]"
-              >
+              <button onClick={addHolding} className={investingPrimarySaveActive}>
                 Add row
               </button>
-              <button
-                onClick={reset}
-                className="rounded-full border border-black/10 bg-white px-3.5 py-1.5 text-xs font-medium text-[#3b352d]"
-              >
+              <button onClick={reset} className={investingToolbarBtn}>
                 Reset
               </button>
             </>
@@ -252,6 +245,15 @@ export default function InvestingTablePage() {
               <th className="w-[90px] px-2 py-2 text-left font-medium">
                 <button type="button" onClick={() => toggleSort("marketPrice")} className="inline-flex items-center gap-1">
                   Market <span>{sortArrow("marketPrice")}</span>
+                </button>
+              </th>
+              <th className="w-[76px] px-2 py-2 text-left font-medium">
+                <button
+                  type="button"
+                  onClick={() => toggleSort("dayChangePercent")}
+                  className="inline-flex items-center gap-1"
+                >
+                  Day % <span>{sortArrow("dayChangePercent")}</span>
                 </button>
               </th>
               <th className="w-[94px] px-2 py-2 text-left font-medium">
@@ -358,6 +360,17 @@ export default function InvestingTablePage() {
                       />
                     </td>
                     <td className="px-2 py-2 text-left">
+                      <div
+                        title="Session change from quotes (Yahoo). Refresh market to update."
+                        className={[
+                          "w-full rounded-lg border border-black/10 bg-[#faf8f2] px-2 py-1.5 text-sm font-semibold tabular-nums",
+                          dayChangeCellClass(h.dayChangePercent),
+                        ].join(" ")}
+                      >
+                        {h.dayChangePercent ?? "—"}
+                      </div>
+                    </td>
+                    <td className="px-2 py-2 text-left">
                       <input
                         value={h.marketValue}
                         onChange={(e) => updateHolding(h.id, { marketValue: e.target.value })}
@@ -383,7 +396,7 @@ export default function InvestingTablePage() {
                       <td className="px-2 py-2">
                         <button
                           onClick={() => deleteHolding(h.id)}
-                          className="rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs font-medium text-[#3b352d] hover:bg-[#faf8f2]"
+                          className={investingToolbarBtn}
                           type="button"
                         >
                           Delete
@@ -413,6 +426,15 @@ export default function InvestingTablePage() {
                     <td className="px-2 py-2 text-left text-sm tabular-nums text-[#2f2922] whitespace-nowrap">
                       {formatUsd(parseUsd(h.marketPrice))}
                     </td>
+                    <td
+                      className={[
+                        "px-2 py-2 text-left text-sm font-semibold tabular-nums whitespace-nowrap",
+                        dayChangeCellClass(h.dayChangePercent),
+                      ].join(" ")}
+                      title="Session change from quotes. Refresh market to update."
+                    >
+                      {h.dayChangePercent ?? "—"}
+                    </td>
                     <td className="px-2 py-2 text-left text-sm tabular-nums text-[#2f2922] whitespace-nowrap">
                       {formatUsd(parseUsd(h.marketValue))}
                     </td>
@@ -431,7 +453,7 @@ export default function InvestingTablePage() {
                 </tr>
                 {expandedRowIds[h.id] ? (
                   <tr className="border-t border-black/5 bg-[#faf8f2]/70">
-                    <td colSpan={mode === "edit" ? 11 : 10} className="px-4 py-3 text-sm">
+                    <td colSpan={mode === "edit" ? 12 : 11} className="px-4 py-3 text-sm">
                       {mode === "edit" ? (
                         <div className="grid gap-2 md:grid-cols-2">
                           <label className="text-xs text-[#6f675b]">

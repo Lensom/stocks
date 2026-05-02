@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
-import type { InvestingHolding } from "@/data/mock-jarvis";
+import type { InvestingHolding } from "@/features/investing/types";
 import { useAuth } from "./auth-store";
 import { apiFetch } from "@/lib/api";
 import { formatUsd, parseUsd } from "@/features/investing/format";
@@ -44,8 +44,17 @@ export type InvestingActivityYearSummary = {
   net_cash_flow: string;
 };
 
+export type InvestingRefillRow = {
+  id: string;
+  date: string;
+  amount: string;
+  commission: string;
+};
+
 export type InvestingPickingRow = {
   id: string;
+  /** etf_reit_fund | value_blue_chips */
+  bucket: string;
   name: string;
   ticker: string;
   industry: string;
@@ -53,13 +62,15 @@ export type InvestingPickingRow = {
   eps: string;
   beta: string;
   div_yield: string;
+  /** From quote API on load (not persisted) */
   current_price: string;
+  day_change_pct: string;
   strong_buy_until: string;
   may_buy_until: string;
   buy_right_now: string;
   price_goal_1y: string;
   price_goal_5y: string;
-  reports: string;
+  notes: string;
 };
 
 type InvestingStore = {
@@ -75,6 +86,12 @@ type InvestingStore = {
   isPickingLoading: boolean;
   isPickingSaving: boolean;
   isPickingDirty: boolean;
+  refills: InvestingRefillRow[];
+  operatingExpensesUsd: string;
+  refillsMeta: { updatedAt: string | null };
+  isRefillsLoading: boolean;
+  isRefillsSaving: boolean;
+  isRefillsDirty: boolean;
   isActivitiesLoading: boolean;
   isActivitiesSaving: boolean;
   isActivitiesDirty: boolean;
@@ -107,6 +124,12 @@ type InvestingStore = {
   deletePickingRow: (id: string) => void;
   refreshPicking: () => Promise<void>;
   savePicking: () => Promise<void>;
+  updateRefill: (id: string, patch: Partial<InvestingRefillRow>) => void;
+  addRefill: () => void;
+  deleteRefill: (id: string) => void;
+  setOperatingExpensesUsd: (value: string) => void;
+  refreshRefills: () => Promise<void>;
+  saveRefills: () => Promise<void>;
   refreshActivities: () => Promise<void>;
   saveActivities: () => Promise<void>;
   refreshCapitalEntries: () => Promise<void>;
@@ -137,6 +160,7 @@ function createEmptyHolding(): InvestingHolding {
     shares: 0,
     avgBuyPrice: "$0.00",
     marketPrice: "$0.00",
+    dayChangePercent: "—",
     marketValue: "$0.00",
     pnl: "$0.00",
     trend: "up",
@@ -164,17 +188,29 @@ function normalizeHoldings(rows: InvestingHolding[]): InvestingHolding[] {
 function applyMarketPrices(
   rows: InvestingHolding[],
   prices: Record<string, number>,
+  dayChangeByTicker?: Record<string, number>,
 ): InvestingHolding[] {
   const updated = rows.map((row) => {
     const ticker = (row.ticker ?? "").trim().toUpperCase();
+    let next: InvestingHolding = { ...row };
     const market = prices[ticker];
-    if (typeof market !== "number" || !Number.isFinite(market)) return row;
-    const shares = Number(row.shares ?? 0) || 0;
-    return {
-      ...row,
-      marketPrice: formatUsd(market),
-      marketValue: formatUsd(market * shares),
-    };
+    if (typeof market === "number" && Number.isFinite(market)) {
+      const shares = Number(row.shares ?? 0) || 0;
+      next = {
+        ...next,
+        marketPrice: formatUsd(market),
+        marketValue: formatUsd(market * shares),
+      };
+    }
+    if (dayChangeByTicker !== undefined) {
+      const d = dayChangeByTicker[ticker];
+      next = {
+        ...next,
+        dayChangePercent:
+          typeof d === "number" && Number.isFinite(d) ? `${d > 0 ? "+" : ""}${d.toFixed(2)}%` : "—",
+      };
+    }
+    return next;
   });
   return normalizeHoldings(updated);
 }
@@ -207,6 +243,12 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
   const [isPickingLoading, setPickingLoading] = useState(false);
   const [isPickingSaving, setPickingSaving] = useState(false);
   const [isPickingDirty, setPickingDirty] = useState(false);
+  const [refills, setRefills] = useState<InvestingRefillRow[]>([]);
+  const [operatingExpensesUsd, setOperatingExpensesUsdState] = useState("");
+  const [refillsMeta, setRefillsMeta] = useState<{ updatedAt: string | null }>({ updatedAt: null });
+  const [isRefillsLoading, setRefillsLoading] = useState(false);
+  const [isRefillsSaving, setRefillsSaving] = useState(false);
+  const [isRefillsDirty, setRefillsDirty] = useState(false);
   const [isActivitiesLoading, setActivitiesLoading] = useState(false);
   const [isActivitiesSaving, setActivitiesSaving] = useState(false);
   const [isActivitiesDirty, setActivitiesDirty] = useState(false);
@@ -246,11 +288,15 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
       );
       if (uniqueTickers.length > 0) {
         try {
-          const quoteRes = await apiFetch<{ prices: Record<string, number> }>(
-            `/investing/quotes?tickers=${encodeURIComponent(uniqueTickers.join(","))}`,
-            { token },
+          const quoteRes = await apiFetch<{
+            prices: Record<string, number>;
+            day_change_percent?: Record<string, number>;
+          }>(`/investing/quotes?tickers=${encodeURIComponent(uniqueTickers.join(","))}`, { token });
+          hydratedHoldings = applyMarketPrices(
+            hydratedHoldings,
+            quoteRes.prices ?? {},
+            quoteRes.day_change_percent ?? {},
           );
-          hydratedHoldings = applyMarketPrices(hydratedHoldings, quoteRes.prices ?? {});
         } catch {
           // Keep persisted holdings if quote provider is unavailable.
         }
@@ -280,11 +326,13 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
     if (uniqueTickers.length === 0) return;
     setMarketPricesLoading(true);
     try {
-      const res = await apiFetch<{ prices: Record<string, number> }>(
-        `/investing/quotes?tickers=${encodeURIComponent(uniqueTickers.join(","))}`,
-        { token },
+      const res = await apiFetch<{
+        prices: Record<string, number>;
+        day_change_percent?: Record<string, number>;
+      }>(`/investing/quotes?tickers=${encodeURIComponent(uniqueTickers.join(","))}`, { token });
+      setHoldings((prev) =>
+        applyMarketPrices(prev, res.prices ?? {}, res.day_change_percent ?? {}),
       );
-      setHoldings((prev) => applyMarketPrices(prev, res.prices ?? {}));
       await refreshMetrics();
     } finally {
       setMarketPricesLoading(false);
@@ -355,6 +403,55 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
       setActivitiesDirty(false);
     } finally {
       setActivitiesSaving(false);
+    }
+  }
+
+  async function refreshRefills() {
+    if (!token) {
+      setRefills([]);
+      setOperatingExpensesUsdState("");
+      setRefillsMeta({ updatedAt: null });
+      setRefillsDirty(false);
+      return;
+    }
+    setRefillsLoading(true);
+    try {
+      const res = await apiFetch<{
+        rows: InvestingRefillRow[];
+        operating_expenses_usd: string;
+        updated_at: string | null;
+      }>("/investing/refills", { token });
+      setRefills(res.rows ?? []);
+      setOperatingExpensesUsdState(res.operating_expenses_usd ?? "");
+      setRefillsMeta({ updatedAt: res.updated_at ?? null });
+      setRefillsDirty(false);
+    } finally {
+      setRefillsLoading(false);
+    }
+  }
+
+  async function saveRefills() {
+    if (!token || !isRefillsDirty) return;
+    setRefillsSaving(true);
+    try {
+      const res = await apiFetch<{
+        rows: InvestingRefillRow[];
+        operating_expenses_usd: string;
+        updated_at: string | null;
+      }>("/investing/refills", {
+        token,
+        method: "PUT",
+        body: JSON.stringify({
+          rows: refills,
+          operating_expenses_usd: operatingExpensesUsd,
+        }),
+      });
+      setRefills(res.rows ?? []);
+      setOperatingExpensesUsdState(res.operating_expenses_usd ?? "");
+      setRefillsMeta({ updatedAt: res.updated_at ?? null });
+      setRefillsDirty(false);
+    } finally {
+      setRefillsSaving(false);
     }
   }
 
@@ -533,6 +630,7 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
     void refreshCapitalEntries().catch(() => {});
     void refreshNotes().catch(() => {});
     void refreshMetrics().catch(() => {});
+    void refreshRefills().catch(() => {});
   }, [token]);
 
   const store = useMemo<InvestingStore>(() => {
@@ -549,6 +647,12 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
       isPickingLoading,
       isPickingSaving,
       isPickingDirty,
+      refills,
+      operatingExpensesUsd,
+      refillsMeta,
+      isRefillsLoading,
+      isRefillsSaving,
+      isRefillsDirty,
       isActivitiesLoading,
       isActivitiesSaving,
       isActivitiesDirty,
@@ -650,6 +754,7 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
               typeof crypto !== "undefined" && "randomUUID" in crypto
                 ? crypto.randomUUID()
                 : `${Date.now()}`,
+            bucket: "value_blue_chips",
             name: "",
             ticker: "",
             industry: "",
@@ -658,12 +763,13 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
             beta: "",
             div_yield: "",
             current_price: "",
+            day_change_pct: "",
             strong_buy_until: "",
             may_buy_until: "",
             buy_right_now: "",
             price_goal_1y: "",
             price_goal_5y: "",
-            reports: "",
+            notes: "",
           },
           ...prev,
         ]);
@@ -674,6 +780,35 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
       },
       refreshPicking,
       savePicking,
+      updateRefill: (id, patch) => {
+        setRefillsDirty(true);
+        setRefills((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+      },
+      addRefill: () => {
+        setRefillsDirty(true);
+        setRefills((prev) => [
+          {
+            id:
+              typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? crypto.randomUUID()
+                : `${Date.now()}`,
+            date: "",
+            amount: "",
+            commission: "",
+          },
+          ...prev,
+        ]);
+      },
+      deleteRefill: (id) => {
+        setRefillsDirty(true);
+        setRefills((prev) => prev.filter((r) => r.id !== id));
+      },
+      setOperatingExpensesUsd: (value) => {
+        setRefillsDirty(true);
+        setOperatingExpensesUsdState(value);
+      },
+      refreshRefills,
+      saveRefills,
       refreshActivities,
       saveActivities,
       refreshCapitalEntries,
@@ -703,6 +838,12 @@ export function InvestingProvider({ children }: { children: ReactNode }) {
     isPickingLoading,
     isPickingSaving,
     isPickingDirty,
+    refills,
+    operatingExpensesUsd,
+    refillsMeta,
+    isRefillsLoading,
+    isRefillsSaving,
+    isRefillsDirty,
     isActivitiesLoading,
     isActivitiesSaving,
     isActivitiesDirty,

@@ -1,9 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo } from "react";
+import { CapitalValueLineChart } from "@/features/investing/charts/capital-value-line-chart";
 import { DonutChart } from "@/features/investing/charts/donut-chart";
-import { parsePercent, parseUsd } from "@/features/investing/format";
+import { YearlyActivityVolumeChart } from "@/features/investing/charts/yearly-activity-volume-chart";
+import { formatInvestingAxisDate, parseInvestingDateMs, parsePercent, parseUsd } from "@/features/investing/format";
 import { useInvesting } from "@/state/investing-store";
 
 const palette = ["#4f46e5", "#10b981", "#f59e0b", "#ef4444", "#06b6d4", "#a855f7"];
@@ -64,7 +65,7 @@ function DarkBars({
 }
 
 export default function InvestingAnalyticsPage() {
-  const { holdings } = useInvesting();
+  const { holdings, capitalEntries, activitiesSummary } = useInvesting();
 
   const allocationSlices = useMemo(() => {
     const byTickerValue = new Map<string, number>();
@@ -125,21 +126,36 @@ export default function InvestingAnalyticsPage() {
       .sort((a, b) => b.value - a.value);
   }, [holdings]);
 
+  const capitalValueSeries = useMemo(() => {
+    const rows = capitalEntries
+      .map((e) => {
+        const ms = parseInvestingDateMs(e.date);
+        if (ms == null) return null;
+        const value = parseUsd(e.total_value);
+        const label = formatInvestingAxisDate(ms);
+        return { ms, label, value };
+      })
+      .filter((r): r is { ms: number; label: string; value: number } => r != null)
+      .sort((a, b) => a.ms - b.ms);
+    return rows.map((r) => ({ label: r.label, value: r.value }));
+  }, [capitalEntries]);
+
+  const activityVolumeByYear = useMemo(() => {
+    return activitiesSummary
+      .map((s) => ({
+        year: parseInt(s.year, 10),
+        purchases: parseUsd(s.purchases_amount),
+        sales: parseUsd(s.sales_amount),
+      }))
+      .filter((d) => Number.isFinite(d.year))
+      .sort((a, b) => a.year - b.year);
+  }, [activitiesSummary]);
+
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-[0.15em] text-[#8f8676]">Investing</p>
-          <h1 className="mt-1.5 text-3xl font-semibold text-[#1f1c17]">Analytics</h1>
-          <p className="mt-1.5 text-sm text-[#655d51]">Analytics built from your holdings table.</p>
-        </div>
-        <Link
-          href="/investing"
-          className="rounded-full border border-black/10 bg-white px-3.5 py-1.5 text-xs font-medium text-[#3b352d]"
-        >
-          Back
-        </Link>
-      </div>
+      <p className="text-sm text-[#655d51]">
+        Holdings, capital trajectory, and activity trends in one place.
+      </p>
 
       <section className="grid gap-4 md:grid-cols-2 md:[&>article]:h-full">
         <article className="flex h-full flex-col rounded-2xl border border-black/5 bg-white/90 p-5 shadow-[0_8px_30px_rgba(18,16,13,0.05)]">
@@ -170,6 +186,11 @@ export default function InvestingAnalyticsPage() {
             <DonutChart title="Target allocation" slices={targetSlices} />
           </div>
         </article>
+      </section>
+
+      <section className="grid gap-4 md:grid-cols-2 md:[&>article]:h-full">
+        <CapitalValueLineChart data={capitalValueSeries} />
+        <YearlyActivityVolumeChart data={activityVolumeByYear} />
       </section>
 
       <section className="grid gap-4 md:grid-cols-2 md:[&>article]:h-full">

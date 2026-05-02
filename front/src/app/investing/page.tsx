@@ -1,4 +1,5 @@
 import { RequireAuth } from "@/components/auth/require-auth";
+import { InvestingMenuOrder } from "@/components/categories/investing-menu-order";
 import { SubcategoriesSection } from "@/components/categories/subcategories-section";
 import Link from "next/link";
 
@@ -22,13 +23,27 @@ export default function InvestingPage() {
               Rebalance: working draft
             </span>
             <Link
+              href="/investing/dashboard"
+              className="rounded-full border border-black/10 bg-[#1f1c17] px-3 py-1 text-xs font-medium text-[#f8f4eb] hover:bg-[#2c2923]"
+            >
+              Stocks workspace
+            </Link>
+            <Link
               href="/investing/activities"
               className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium text-[#3b352d] hover:bg-[#faf8f2]"
             >
-              Open Activities
+              Activities
+            </Link>
+            <Link
+              href="/investing/crypto"
+              className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium text-[#3b352d] hover:bg-[#faf8f2]"
+            >
+              Crypto
             </Link>
           </div>
         </section>
+
+        <InvestingMenuOrder />
 
         <SubcategoriesSection categorySlug="investing" />
       </div>

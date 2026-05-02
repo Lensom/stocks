@@ -1,7 +1,16 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
+import {
+  investingMetaBadge,
+  investingPageStack,
+  investingPrimarySaveActive,
+  investingPrimarySaveDisabled,
+  investingSubsectionStack,
+  investingTableScrollWrap,
+  investingToolbarBtn,
+} from "@/features/investing/ui/investing-classes";
+import { InvestingSubsectionHeader } from "@/features/investing/ui/investing-subsection-header";
 import { useInvesting } from "@/state/investing-store";
 
 function inputBaseClasses() {
@@ -36,7 +45,7 @@ export default function InvestingActivitiesPage() {
 
   function renderTable(rows: typeof activities, kind: "buy" | "sell") {
     return (
-      <div className="overflow-x-auto rounded-xl border border-black/5">
+      <div className={investingTableScrollWrap}>
         <table className="w-full min-w-[980px] border-collapse text-left text-sm">
           <thead className="bg-[#f4efe4] text-xs text-[#7f7668]">
             <tr>
@@ -176,11 +185,7 @@ export default function InvestingActivitiesPage() {
                   />
                 </td>
                 <td className="px-2 py-2">
-                  <button
-                    type="button"
-                    onClick={() => deleteActivity(row.id)}
-                    className="rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs font-medium text-[#3b352d] hover:bg-[#faf8f2]"
-                  >
+                  <button type="button" onClick={() => deleteActivity(row.id)} className={investingToolbarBtn}>
                     Delete
                   </button>
                 </td>
@@ -203,77 +208,46 @@ export default function InvestingActivitiesPage() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-[0.15em] text-[#8f8676]">
-            Investing
-          </p>
-          <h1 className="mt-1.5 text-3xl font-semibold text-[#1f1c17]">
-            Activities
-          </h1>
-          <p className="mt-1.5 text-sm text-[#655d51]">
-            Purchases and sales history with yearly totals from your database.
-          </p>
-        </div>
-        <Link
-          href="/investing"
-          className="rounded-full border border-black/10 bg-white px-3.5 py-1.5 text-xs font-medium text-[#3b352d]"
-        >
-          Back
-        </Link>
-      </div>
+    <div className={investingPageStack}>
+      <p className="text-sm text-[#655d51]">
+        Purchases and sales history with yearly totals from your database.
+      </p>
 
       <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded-full border border-black/10 bg-white/70 px-3 py-1 text-xs text-[#6f675b]">
+        <span className={investingMetaBadge}>
           {activitiesMeta.updatedAt
             ? `Synced ${new Date(activitiesMeta.updatedAt).toLocaleString()}`
             : "Not synced"}
         </span>
-        <button
-          type="button"
-          onClick={() => addActivity("buy")}
-          className="rounded-full border border-black/10 bg-white px-3.5 py-1.5 text-xs font-medium text-[#3b352d] hover:bg-[#faf8f2]"
-        >
+        <button type="button" onClick={() => addActivity("buy")} className={investingToolbarBtn}>
           Add purchase
         </button>
-        <button
-          type="button"
-          onClick={() => addActivity("sell")}
-          className="rounded-full border border-black/10 bg-white px-3.5 py-1.5 text-xs font-medium text-[#3b352d] hover:bg-[#faf8f2]"
-        >
+        <button type="button" onClick={() => addActivity("sell")} className={investingToolbarBtn}>
           Add sale
         </button>
         <button
           type="button"
           onClick={() => void saveActivities()}
-          disabled={
-            !isActivitiesDirty || isActivitiesSaving || isActivitiesLoading
-          }
+          disabled={!isActivitiesDirty || isActivitiesSaving || isActivitiesLoading}
           className={[
-            "rounded-full px-3.5 py-1.5 text-xs font-medium transition",
+            "transition",
             !isActivitiesDirty || isActivitiesSaving || isActivitiesLoading
-              ? "cursor-not-allowed bg-black/10 text-[#6f675b]"
-              : "bg-[#1f1c17] text-[#f8f4eb] hover:bg-[#2c2923]",
+              ? investingPrimarySaveDisabled
+              : investingPrimarySaveActive,
           ].join(" ")}
         >
           {isActivitiesSaving ? "Saving..." : "Save"}
         </button>
       </div>
 
-      <section className="space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-[#1f1c17]">Yearly totals</h2>
-          <button
-            type="button"
-            onClick={() => setYearlyOpen((v) => !v)}
-            className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium text-[#3b352d] hover:bg-[#faf8f2]"
-          >
-            {isYearlyOpen ? "Hide" : "Show"}
-          </button>
-        </div>
+      <section className={investingSubsectionStack}>
+        <InvestingSubsectionHeader
+          title="Yearly totals"
+          isOpen={isYearlyOpen}
+          onToggle={() => setYearlyOpen((v) => !v)}
+        />
         {isYearlyOpen ? (
-          <div className="overflow-x-auto rounded-xl border border-black/5">
+          <div className={investingTableScrollWrap}>
           <table className="w-full min-w-[860px] border-collapse text-left text-sm">
             <thead className="bg-[#f4efe4] text-xs text-[#7f7668]">
               <tr>
@@ -330,31 +304,21 @@ export default function InvestingActivitiesPage() {
         ) : null}
       </section>
 
-      <section className="space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-[#1f1c17]">Purchases</h2>
-          <button
-            type="button"
-            onClick={() => setPurchasesOpen((v) => !v)}
-            className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium text-[#3b352d] hover:bg-[#faf8f2]"
-          >
-            {isPurchasesOpen ? "Hide" : "Show"}
-          </button>
-        </div>
+      <section className={investingSubsectionStack}>
+        <InvestingSubsectionHeader
+          title="Purchases"
+          isOpen={isPurchasesOpen}
+          onToggle={() => setPurchasesOpen((v) => !v)}
+        />
         {isPurchasesOpen ? renderTable(purchases, "buy") : null}
       </section>
 
-      <section className="space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-[#1f1c17]">Sales</h2>
-          <button
-            type="button"
-            onClick={() => setSalesOpen((v) => !v)}
-            className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium text-[#3b352d] hover:bg-[#faf8f2]"
-          >
-            {isSalesOpen ? "Hide" : "Show"}
-          </button>
-        </div>
+      <section className={investingSubsectionStack}>
+        <InvestingSubsectionHeader
+          title="Sales"
+          isOpen={isSalesOpen}
+          onToggle={() => setSalesOpen((v) => !v)}
+        />
         {isSalesOpen ? renderTable(sales, "sell") : null}
       </section>
     </div>

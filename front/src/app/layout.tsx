@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Olivia Stocks",
-  description: "Mock stock dashboard for UI practice",
+  description: "Personal finance and investing dashboard",
 };
 
 export default function RootLayout({

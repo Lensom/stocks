@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class InvestingMetricsResponse(BaseModel):
@@ -40,6 +40,10 @@ class InvestingHoldingsUpdateRequest(BaseModel):
 
 class InvestingQuotesResponse(BaseModel):
     prices: dict[str, float] = Field(default_factory=dict)
+    day_change_percent: dict[str, float] = Field(
+        default_factory=dict,
+        description="Ticker (uppercase) → change in percent points: Yahoo session change when available; else CoinGecko 24h.",
+    )
     as_of: str | None = None
 
 
@@ -117,7 +121,12 @@ class InvestingActivitiesUpdateRequest(BaseModel):
 
 
 class InvestingPickingRow(BaseModel):
+    """Rows persisted per user. `current_price` and `day_change_pct` are filled from quotes on GET and not stored."""
+
+    model_config = ConfigDict(extra="ignore")
+
     id: str
+    bucket: str = ""
     name: str = ""
     ticker: str = ""
     industry: str = ""
@@ -126,12 +135,13 @@ class InvestingPickingRow(BaseModel):
     beta: str = ""
     div_yield: str = ""
     current_price: str = ""
+    day_change_pct: str = ""
     strong_buy_until: str = ""
     may_buy_until: str = ""
     buy_right_now: str = ""
     price_goal_1y: str = ""
     price_goal_5y: str = ""
-    reports: str = ""
+    notes: str = ""
 
 
 class InvestingPickingResponse(BaseModel):
@@ -141,3 +151,78 @@ class InvestingPickingResponse(BaseModel):
 
 class InvestingPickingUpdateRequest(BaseModel):
     rows: list[InvestingPickingRow] = Field(default_factory=list)
+
+
+class InvestingRefillRow(BaseModel):
+    """Account top-up (refill): date, invested amount, commission in USD."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    date: str = ""
+    amount: str = ""
+    commission: str = ""
+
+
+class InvestingRefillsResponse(BaseModel):
+    rows: list[InvestingRefillRow]
+    operating_expenses_usd: str = ""
+    updated_at: str | None = None
+
+
+class InvestingRefillsUpdateRequest(BaseModel):
+    rows: list[InvestingRefillRow] = Field(default_factory=list)
+    operating_expenses_usd: str = Field(default="", max_length=64)
+
+
+class CryptoHolding(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    symbol: str = ""
+    name: str = ""
+    quantity: str = ""
+
+
+class CryptoPurchaseRow(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    date: str = ""
+    btc_usd: str = ""
+    btc_price: str = ""
+    eth_usd: str = ""
+    eth_price: str = ""
+
+
+class CryptoRefillRow(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    date: str = ""
+    uah: str = ""
+    usd: str = ""
+
+
+class CryptoRules(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    btc_percent: str = "70"
+    eth_percent: str = "30"
+    btc_note: str = ""
+    eth_note: str = ""
+
+
+class InvestingCryptoResponse(BaseModel):
+    holdings: list[CryptoHolding]
+    purchase_rows: list[CryptoPurchaseRow]
+    refill_rows: list[CryptoRefillRow]
+    rules: CryptoRules
+    updated_at: str | None = None
+
+
+class InvestingCryptoUpdateRequest(BaseModel):
+    holdings: list[CryptoHolding] = Field(default_factory=list)
+    purchase_rows: list[CryptoPurchaseRow] = Field(default_factory=list)
+    refill_rows: list[CryptoRefillRow] = Field(default_factory=list)
+    rules: CryptoRules = Field(default_factory=CryptoRules)

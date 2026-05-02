@@ -40,10 +40,14 @@ def init_db(pool: ConnectionPool) -> None:
                 category_id BIGINT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
                 name TEXT NOT NULL,
                 slug TEXT NOT NULL,
+                sort_order INT NOT NULL DEFAULT 0,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 UNIQUE(category_id, slug)
             );
             """
+        )
+        conn.execute(
+            "ALTER TABLE subcategories ADD COLUMN IF NOT EXISTS sort_order INT NOT NULL DEFAULT 0"
         )
         conn.execute(
             """
@@ -96,6 +100,25 @@ def init_db(pool: ConnectionPool) -> None:
             CREATE TABLE IF NOT EXISTS investing_picking (
                 user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
                 rows JSONB NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS investing_refills (
+                user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                rows JSONB NOT NULL DEFAULT '[]'::jsonb,
+                operating_expenses_usd TEXT NOT NULL DEFAULT '',
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS investing_crypto (
+                user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                data JSONB NOT NULL DEFAULT '{}'::jsonb,
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
             """

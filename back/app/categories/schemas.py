@@ -22,4 +22,9 @@ class SubcategoryResponse(BaseModel):
     category_id: int
     name: str
     slug: str
+    sort_order: int = 0
+
+
+class SubcategoryReorderRequest(BaseModel):
+    ordered_ids: list[int] = Field(min_length=1)
 

@@ -5,6 +5,7 @@ from typing import Annotated
 import json
 import re
 import time
+import uuid
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
@@ -32,6 +33,15 @@ from app.investing.schemas import (
     InvestingPickingResponse,
     InvestingPickingRow,
     InvestingPickingUpdateRequest,
+    InvestingRefillRow,
+    InvestingRefillsResponse,
+    InvestingRefillsUpdateRequest,
+    CryptoHolding,
+    CryptoPurchaseRow,
+    CryptoRefillRow,
+    CryptoRules,
+    InvestingCryptoResponse,
+    InvestingCryptoUpdateRequest,
 )
 
 
@@ -351,6 +361,168 @@ def _fetch_yahoo_quote_rows(tickers: list[str]) -> dict[str, dict]:
     return rows
 
 
+# Base symbol (BTC, ETH) → CoinGecko id for /simple/price (fills gaps when Yahoo/Stooq miss crypto).
+_COINGECKO_IDS: dict[str, str] = {
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "SOL": "solana",
+    "BNB": "binancecoin",
+    "XRP": "ripple",
+    "ADA": "cardano",
+    "DOGE": "dogecoin",
+    "DOT": "polkadot",
+    "MATIC": "matic-network",
+    "AVAX": "avalanche-2",
+    "LINK": "chainlink",
+    "ATOM": "cosmos",
+    "LTC": "litecoin",
+    "TRX": "tron",
+    "SHIB": "shiba-inu",
+    "UNI": "uniswap",
+    "ARB": "arbitrum",
+    "OP": "optimism",
+    "APT": "aptos",
+    "NEAR": "near",
+}
+
+
+def _ticker_base_crypto(t: str) -> str:
+    u = t.upper().strip()
+    if u.endswith("-USD"):
+        return u[:-4]
+    return u
+
+
+def _fetch_coingecko_crypto_quotes(tickers: list[str]) -> tuple[dict[str, float], dict[str, float]]:
+    """Prices (USD) and ~24h change % from CoinGecko. Keys match requested tickers (e.g. BTC-USD)."""
+    prices: dict[str, float] = {}
+    day_pct: dict[str, float] = {}
+    id_to_tickers: dict[str, list[str]] = {}
+    for t in tickers:
+        base = _ticker_base_crypto(t)
+        cg_id = _COINGECKO_IDS.get(base)
+        if cg_id:
+            id_to_tickers.setdefault(cg_id, []).append(t)
+    if not id_to_tickers:
+        return prices, day_pct
+    ids_param = ",".join(sorted(id_to_tickers.keys()))
+    url = (
+        "https://api.coingecko.com/api/v3/simple/price"
+        f"?ids={ids_param}&vs_currencies=usd&include_24hr_change=true"
+    )
+    try:
+        with urlopen(url, timeout=12) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
+        return prices, day_pct
+    if not isinstance(payload, dict):
+        return prices, day_pct
+    for cg_id, tlist in id_to_tickers.items():
+        row = payload.get(cg_id)
+        if not isinstance(row, dict):
+            continue
+        usd = row.get("usd")
+        ch = row.get("usd_24h_change")
+        if isinstance(usd, (int, float)) and float(usd) > 0:
+            for t in tlist:
+                prices[t] = float(usd)
+        if isinstance(ch, (int, float)):
+            for t in tlist:
+                day_pct[t] = float(ch)
+    return prices, day_pct
+
+
+_PICKING_STORED_KEYS = (
+    "id",
+    "bucket",
+    "name",
+    "ticker",
+    "industry",
+    "pe",
+    "eps",
+    "beta",
+    "div_yield",
+    "strong_buy_until",
+    "may_buy_until",
+    "buy_right_now",
+    "price_goal_1y",
+    "price_goal_5y",
+    "notes",
+)
+
+
+def _normalize_stored_picking_row(raw: dict) -> dict:
+    d = {str(k): "" if v is None else str(v) for k, v in raw.items()}
+    notes = str(d.get("notes") or "").strip()
+    if not notes and d.get("reports"):
+        notes = str(d.get("reports") or "").strip()
+    d.pop("reports", None)
+    d.pop("current_price", None)
+    d.pop("day_change_pct", None)
+    out = {k: "" for k in _PICKING_STORED_KEYS}
+    for k in _PICKING_STORED_KEYS:
+        if k == "notes":
+            out[k] = notes
+        else:
+            out[k] = str(d.get(k) or "")
+    if not str(out.get("bucket") or "").strip():
+        out["bucket"] = "value_blue_chips"
+    return out
+
+
+def _pick_row_to_storage(row: InvestingPickingRow) -> dict:
+    d = row.model_dump()
+    return {k: str(d.get(k) or "") for k in _PICKING_STORED_KEYS}
+
+
+def _enrich_picking_rows(rows: list[dict]) -> list[dict]:
+    tickers = list(
+        dict.fromkeys(
+            str(r.get("ticker", "")).strip().upper() for r in rows if str(r.get("ticker", "")).strip()
+        )
+    )[:50]
+    quotes = _fetch_yahoo_quote_rows(tickers) if tickers else {}
+    missing: list[str] = []
+    for t in tickers:
+        q = quotes.get(t)
+        rm = q.get("regularMarketPrice") if q else None
+        if not isinstance(rm, (int, float)) or float(rm) <= 0:
+            missing.append(t)
+    backup = _fetch_market_prices(missing) if missing else {}
+    mapped_cg = [t for t in tickers if _COINGECKO_IDS.get(_ticker_base_crypto(t))]
+    cg_prices_p, cg_day_p = _fetch_coingecko_crypto_quotes(mapped_cg) if mapped_cg else ({}, {})
+    out: list[dict] = []
+    for r in rows:
+        row = dict(r)
+        t = str(row.get("ticker", "")).strip().upper()
+        q = quotes.get(t) if t else None
+        price_val: float | None = None
+        day_pct: float | None = None
+        if q:
+            rm = q.get("regularMarketPrice")
+            if isinstance(rm, (int, float)) and float(rm) > 0:
+                price_val = float(rm)
+            ch = q.get("regularMarketChangePercent")
+            if isinstance(ch, (int, float)):
+                day_pct = float(ch)
+        if price_val is None and t:
+            b = backup.get(t)
+            if isinstance(b, (int, float)) and float(b) > 0:
+                price_val = float(b)
+        if price_val is None and t:
+            cp = cg_prices_p.get(t)
+            if isinstance(cp, (int, float)) and float(cp) > 0:
+                price_val = float(cp)
+        if day_pct is None and t:
+            cd = cg_day_p.get(t)
+            if isinstance(cd, (int, float)):
+                day_pct = float(cd)
+        row["current_price"] = f"{price_val:.2f}" if price_val is not None else ""
+        row["day_change_pct"] = f"{day_pct:.2f}%" if day_pct is not None else ""
+        out.append(row)
+    return out
+
+
 def _fetch_finviz_fundamentals(ticker: str) -> tuple[float | None, float | None]:
     now = time.time()
     cached = _fundamentals_cache.get(ticker)
@@ -453,9 +625,43 @@ def get_quotes(
     parsed = [t.strip().upper() for t in tickers.split(",") if t.strip()]
     unique_tickers = list(dict.fromkeys(parsed))[:50]
     if not unique_tickers:
-        return InvestingQuotesResponse(prices={}, as_of=datetime.utcnow().isoformat())
-    prices = _fetch_yahoo_prices(unique_tickers)
-    return InvestingQuotesResponse(prices=prices, as_of=datetime.utcnow().isoformat())
+        return InvestingQuotesResponse(prices={}, day_change_percent={}, as_of=datetime.utcnow().isoformat())
+    rows = _fetch_yahoo_quote_rows(unique_tickers)
+    prices: dict[str, float] = {}
+    day_change: dict[str, float] = {}
+    missing_prices: list[str] = []
+    for t in unique_tickers:
+        q = rows.get(t)
+        if q:
+            rm = q.get("regularMarketPrice")
+            if isinstance(rm, (int, float)) and float(rm) > 0:
+                prices[t] = float(rm)
+            ch = q.get("regularMarketChangePercent")
+            if isinstance(ch, (int, float)):
+                day_change[t] = float(ch)
+        if t not in prices:
+            missing_prices.append(t)
+    if missing_prices:
+        backup = _fetch_market_prices(missing_prices)
+        for t, p in backup.items():
+            if t not in prices and isinstance(p, (int, float)) and float(p) > 0:
+                prices[t] = float(p)
+
+    crypto_mapped = [t for t in unique_tickers if _COINGECKO_IDS.get(_ticker_base_crypto(t))]
+    if crypto_mapped:
+        cg_prices, cg_day = _fetch_coingecko_crypto_quotes(crypto_mapped)
+        for t, p in cg_prices.items():
+            if t not in prices:
+                prices[t] = p
+        for t, d in cg_day.items():
+            if t not in day_change:
+                day_change[t] = d
+
+    return InvestingQuotesResponse(
+        prices=prices,
+        day_change_percent=day_change,
+        as_of=datetime.utcnow().isoformat(),
+    )
 
 
 @router.get("/metrics", response_model=InvestingMetricsResponse)
@@ -705,8 +911,9 @@ def get_picking(
     if not row:
         return InvestingPickingResponse(rows=[], updated_at=None)
     raw = row[0] if isinstance(row[0], list) else []
-    normalized = [InvestingPickingRow(**r).model_dump() if isinstance(r, dict) else InvestingPickingRow(id=str(r)).model_dump() for r in raw]
-    return InvestingPickingResponse(rows=normalized, updated_at=str(row[1]))
+    base = [_normalize_stored_picking_row(r) for r in raw if isinstance(r, dict)]
+    enriched = _enrich_picking_rows(base)
+    return InvestingPickingResponse(rows=[InvestingPickingRow(**e) for e in enriched], updated_at=str(row[1]))
 
 
 @router.put("/picking", response_model=InvestingPickingResponse)
@@ -715,7 +922,7 @@ def update_picking(
     user: Annotated[UserResponse, Depends(get_current_user)],
     conn: Annotated[Connection, Depends(get_conn)],
 ):
-    rows_json = [r.model_dump() for r in payload.rows]
+    rows_json = [_pick_row_to_storage(r) for r in payload.rows]
     row = conn.execute(
         """
         INSERT INTO investing_picking(user_id, rows, updated_at)
@@ -729,5 +936,206 @@ def update_picking(
     ).fetchone()
     conn.commit()
     updated_at = str(row[0]) if row else None
-    return InvestingPickingResponse(rows=rows_json, updated_at=updated_at)
+    enriched = _enrich_picking_rows([dict(r) for r in rows_json])
+    return InvestingPickingResponse(rows=[InvestingPickingRow(**e) for e in enriched], updated_at=updated_at)
+
+
+def _normalize_refill_row(raw: dict) -> dict:
+    amt = raw.get("amount")
+    if amt is None and raw.get("invest") is not None:
+        amt = raw.get("invest")
+    return {
+        "id": str(raw.get("id", "")),
+        "date": str(raw.get("date", "")),
+        "amount": str(amt if amt is not None else ""),
+        "commission": str(raw.get("commission", "")),
+    }
+
+
+def _sort_refill_rows(rows: list[dict]) -> list[dict]:
+    return sorted(rows, key=lambda r: _parse_date(str(r.get("date", ""))))
+
+
+@router.get("/refills", response_model=InvestingRefillsResponse)
+def get_refills(
+    user: Annotated[UserResponse, Depends(get_current_user)],
+    conn: Annotated[Connection, Depends(get_conn)],
+):
+    row = conn.execute(
+        "SELECT rows, operating_expenses_usd, updated_at FROM investing_refills WHERE user_id = %s",
+        (user.id,),
+    ).fetchone()
+    if not row:
+        return InvestingRefillsResponse(rows=[], operating_expenses_usd="", updated_at=None)
+    raw_rows = row[0] if isinstance(row[0], list) else []
+    opx = str(row[1] if row[1] is not None else "")
+    normalized = [_normalize_refill_row(r) for r in raw_rows if isinstance(r, dict)]
+    sorted_rows = _sort_refill_rows(normalized)
+    return InvestingRefillsResponse(
+        rows=[InvestingRefillRow(**r) for r in sorted_rows],
+        operating_expenses_usd=opx,
+        updated_at=str(row[2]),
+    )
+
+
+@router.put("/refills", response_model=InvestingRefillsResponse)
+def update_refills(
+    payload: InvestingRefillsUpdateRequest,
+    user: Annotated[UserResponse, Depends(get_current_user)],
+    conn: Annotated[Connection, Depends(get_conn)],
+):
+    rows_json = [_normalize_refill_row(r.model_dump()) for r in payload.rows]
+    rows_json = _sort_refill_rows(rows_json)
+    opx = str(payload.operating_expenses_usd or "").strip()[:64]
+    row = conn.execute(
+        """
+        INSERT INTO investing_refills(user_id, rows, operating_expenses_usd, updated_at)
+        VALUES (%s, %s, %s, NOW())
+        ON CONFLICT (user_id)
+        DO UPDATE SET rows = EXCLUDED.rows,
+                      operating_expenses_usd = EXCLUDED.operating_expenses_usd,
+                      updated_at = NOW()
+        RETURNING updated_at
+        """,
+        (user.id, Json(rows_json), opx),
+    ).fetchone()
+    conn.commit()
+    updated_at = str(row[0]) if row else None
+    return InvestingRefillsResponse(
+        rows=[InvestingRefillRow(**r) for r in rows_json],
+        operating_expenses_usd=opx,
+        updated_at=updated_at,
+    )
+
+
+_CRYPTO_DEFAULT_RULES: dict[str, str] = {
+    "btc_percent": "70",
+    "eth_percent": "30",
+    "btc_note": "",
+    "eth_note": "",
+}
+
+
+def _normalize_crypto_holding(raw: dict) -> dict:
+    rid = str(raw.get("id", "")).strip()
+    return {
+        "id": rid if rid else str(uuid.uuid4()),
+        "symbol": str(raw.get("symbol", "")).strip(),
+        "name": str(raw.get("name", "")).strip(),
+        "quantity": str(raw.get("quantity", "")).strip(),
+    }
+
+
+def _normalize_crypto_purchase(raw: dict) -> dict:
+    rid = str(raw.get("id", "")).strip()
+    return {
+        "id": rid if rid else str(uuid.uuid4()),
+        "date": str(raw.get("date", "")).strip(),
+        "btc_usd": str(raw.get("btc_usd", "")).strip(),
+        "btc_price": str(raw.get("btc_price", "")).strip(),
+        "eth_usd": str(raw.get("eth_usd", "")).strip(),
+        "eth_price": str(raw.get("eth_price", "")).strip(),
+    }
+
+
+def _normalize_crypto_refill(raw: dict) -> dict:
+    rid = str(raw.get("id", "")).strip()
+    return {
+        "id": rid if rid else str(uuid.uuid4()),
+        "date": str(raw.get("date", "")).strip(),
+        "uah": str(raw.get("uah", "")).strip(),
+        "usd": str(raw.get("usd", "")).strip(),
+    }
+
+
+def _normalize_crypto_rules(raw: dict | None) -> dict[str, str]:
+    base = dict(_CRYPTO_DEFAULT_RULES)
+    if isinstance(raw, dict):
+        for k in base:
+            if k in raw and raw[k] is not None:
+                base[k] = str(raw[k]).strip()[:500]
+    return base
+
+
+def _sort_crypto_purchases(rows: list[dict]) -> list[dict]:
+    return sorted(rows, key=lambda r: _parse_date(str(r.get("date", ""))))
+
+
+def _sort_crypto_refills(rows: list[dict]) -> list[dict]:
+    return sorted(rows, key=lambda r: _parse_date(str(r.get("date", ""))))
+
+
+def _crypto_from_db_row(data: dict | None) -> InvestingCryptoResponse:
+    d = data if isinstance(data, dict) else {}
+    holdings_raw = d.get("holdings") if isinstance(d.get("holdings"), list) else []
+    purchases_raw = d.get("purchase_rows") if isinstance(d.get("purchase_rows"), list) else []
+    refills_raw = d.get("refill_rows") if isinstance(d.get("refill_rows"), list) else []
+    rules_raw = d.get("rules")
+
+    holdings = [_normalize_crypto_holding(x) for x in holdings_raw if isinstance(x, dict)]
+    purchases = _sort_crypto_purchases([_normalize_crypto_purchase(x) for x in purchases_raw if isinstance(x, dict)])
+    refills = _sort_crypto_refills([_normalize_crypto_refill(x) for x in refills_raw if isinstance(x, dict)])
+    rules = _normalize_crypto_rules(rules_raw if isinstance(rules_raw, dict) else None)
+
+    return InvestingCryptoResponse(
+        holdings=[CryptoHolding(**h) for h in holdings],
+        purchase_rows=[CryptoPurchaseRow(**p) for p in purchases],
+        refill_rows=[CryptoRefillRow(**r) for r in refills],
+        rules=CryptoRules(**rules),
+        updated_at=None,
+    )
+
+
+@router.get("/crypto", response_model=InvestingCryptoResponse)
+def get_crypto(
+    user: Annotated[UserResponse, Depends(get_current_user)],
+    conn: Annotated[Connection, Depends(get_conn)],
+):
+    row = conn.execute(
+        "SELECT data, updated_at FROM investing_crypto WHERE user_id = %s",
+        (user.id,),
+    ).fetchone()
+    if not row:
+        return _crypto_from_db_row({})
+    data = row[0] if isinstance(row[0], dict) else {}
+    payload = _crypto_from_db_row(data)
+    return InvestingCryptoResponse(**(payload.model_dump() | {"updated_at": str(row[1])}))
+
+
+@router.put("/crypto", response_model=InvestingCryptoResponse)
+def update_crypto(
+    payload: InvestingCryptoUpdateRequest,
+    user: Annotated[UserResponse, Depends(get_current_user)],
+    conn: Annotated[Connection, Depends(get_conn)],
+):
+    holdings = [_normalize_crypto_holding(h.model_dump()) for h in payload.holdings]
+    purchases = _sort_crypto_purchases([_normalize_crypto_purchase(p.model_dump()) for p in payload.purchase_rows])
+    refills = _sort_crypto_refills([_normalize_crypto_refill(r.model_dump()) for r in payload.refill_rows])
+    rules = _normalize_crypto_rules(payload.rules.model_dump())
+
+    data_obj = {
+        "holdings": holdings,
+        "purchase_rows": purchases,
+        "refill_rows": refills,
+        "rules": rules,
+    }
+    row = conn.execute(
+        """
+        INSERT INTO investing_crypto(user_id, data, updated_at)
+        VALUES (%s, %s, NOW())
+        ON CONFLICT (user_id)
+        DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+        RETURNING updated_at
+        """,
+        (user.id, Json(data_obj)),
+    ).fetchone()
+    conn.commit()
+    updated_at = str(row[0]) if row else None
+    return InvestingCryptoResponse(
+        holdings=[CryptoHolding(**h) for h in holdings],
+        purchase_rows=[CryptoPurchaseRow(**p) for p in purchases],
+        refill_rows=[CryptoRefillRow(**r) for r in refills],
+        rules=CryptoRules(**rules),
+        updated_at=updated_at,
+    )
 
